@@ -1,0 +1,18 @@
+{
+  "name": "m2pi-stack",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@12.5.1",
+  "engines": {
+    "node": ">=22.19.0",
+    "pnpm": ">=12.5.1"
+  },
+  "scripts": {
+    "check": "pnpm --filter @m2pi/discord-gateway check",
+    "test": "pnpm --filter @m2pi/discord-gateway test",
+    "smoke:pi": "pnpm --filter @m2pi/discord-gateway smoke:pi",
+    "audit:high": "pnpm audit --audit-level high",
+    "pi": "./scripts/pi.sh",
+    "verify": "./scripts/verify.sh"
+  }
+}

@@ -1,0 +1,21 @@
+[Unit]
+Description=m2pi Pi Discord Gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/m2pi/m2pi-stack
+EnvironmentFile=/home/m2pi/.env
+Environment=PI_CODING_AGENT_DIR=/home/m2pi/m2pi-stack/pi/agent
+ExecStart=/usr/local/bin/node /home/m2pi/m2pi-stack/apps/discord-gateway/src/index.js
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/m2pi/.pi /home/m2pi/.local/state/pi-discord-gateway
+
+[Install]
+WantedBy=default.target

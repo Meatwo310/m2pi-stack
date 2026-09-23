@@ -1,0 +1,20 @@
+{
+  "name": "@m2pi/discord-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Discord gateway for the m2pi Pi Coding Agent stack",
+  "scripts": {
+    "start": "node --env-file=/home/m2pi/.env src/index.js",
+    "test": "node --test",
+    "check": "node --check src/index.js && node --check src/pi-session.js",
+    "smoke:pi": "node --env-file=/home/m2pi/.env scripts/smoke-pi.js"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "0.85.1",
+    "discord.js": "14.27.0"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}
