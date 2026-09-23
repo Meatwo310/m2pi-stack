@@ -1,0 +1,10 @@
+{
+  "name": "@m2pi/local-plugins",
+  "private": true,
+  "type": "module",
+  "pi": {
+    "extensions": [],
+    "skills": [],
+    "prompts": []
+  }
+}

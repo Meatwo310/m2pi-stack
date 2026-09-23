@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+instances/*/.env
+instances/*/secrets/
+instances/*/data/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
