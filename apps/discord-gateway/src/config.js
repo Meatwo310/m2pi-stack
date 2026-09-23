@@ -1,38 +1,50 @@
-import { fileURLToPath } from "node:url";
+import { homedir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { ConfigStore } from "./config-store.js";
 
-const DEFAULT_MODEL = "openrouter/openrouter/free";
 const REPO_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 
-export function parseList(value) {
-  return String(value ?? "")
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
+function stateRoot(homeDir, stateHome) {
+  return stateHome || join(homeDir, ".local", "state");
 }
 
-export function parseIdSet(value) {
-  return new Set(parseList(value));
+export function defaultDatabasePath({
+  homeDir = homedir(),
+  stateHome = process.env.XDG_STATE_HOME,
+} = {}) {
+  return join(stateRoot(homeDir, stateHome), "pi-discord-gateway", "state.db");
+}
+
+export function defaultRuntimeConfig({
+  homeDir = homedir(),
+  stateHome = process.env.XDG_STATE_HOME,
+  repoRoot = REPO_ROOT,
+} = {}) {
+  return {
+    model: "openrouter/openrouter/free",
+    cwd: homeDir,
+    agentDir: join(repoRoot, "pi", "agent"),
+    allowedTools: [],
+    sessionRoot: join(
+      stateRoot(homeDir, stateHome),
+      "pi-discord-gateway",
+      "sessions",
+    ),
+  };
 }
 
 export function loadConfig(env = process.env) {
   const token = env.DISCORD_TOKEN || env.DISCORD_BOT_TOKEN;
   if (!token) throw new Error("DISCORD_TOKEN is required");
 
-  const allowedUserIds = parseIdSet(env.DISCORD_ALLOWED_USER_IDS);
-  if (allowedUserIds.size === 0) {
-    throw new Error("DISCORD_ALLOWED_USER_IDS must contain at least one user ID");
+  const databasePath = env.M2PI_DATABASE_PATH || defaultDatabasePath({
+    stateHome: env.XDG_STATE_HOME,
+  });
+  const store = new ConfigStore(databasePath);
+  try {
+    return { token, databasePath, ...store.read() };
+  } finally {
+    store.close();
   }
-
-  return {
-    token,
-    allowedUserIds,
-    model: env.PI_MODEL || DEFAULT_MODEL,
-    cwd: env.PI_CWD || "/home/m2pi",
-    agentDir: env.PI_CODING_AGENT_DIR || join(REPO_ROOT, "pi", "agent"),
-    allowedTools: parseList(env.PI_GATEWAY_TOOLS),
-    sessionRoot:
-      env.PI_DISCORD_SESSION_DIR ||
-      "/home/m2pi/.local/state/pi-discord-gateway/sessions",
-  };
 }

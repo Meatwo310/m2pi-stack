@@ -7,8 +7,9 @@
   "scripts": {
     "start": "node --env-file=/home/m2pi/.env src/index.js",
     "test": "node --test",
-    "check": "node --check src/index.js && node --check src/pi-session.js",
-    "smoke:pi": "node --env-file=/home/m2pi/.env scripts/smoke-pi.js"
+    "check": "node --check src/index.js && node --check src/pi-session.js && node --check src/config-store.js && node --check scripts/config-db.js",
+    "smoke:pi": "node --env-file=/home/m2pi/.env scripts/smoke-pi.js",
+    "config": "node --env-file=/home/m2pi/.env scripts/config-db.js"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "0.85.1",
