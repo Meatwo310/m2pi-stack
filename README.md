@@ -4,7 +4,7 @@ Pi Agent を Discord から使うための Compose スタックです。1 つの
 
 ## セットアップ
 
-Node.js 24.15 以上、pnpm 11、Docker Compose が必要です。Discord アプリでは **Message Content Intent** を有効にし、bot にメッセージの閲覧・送信、スレッド作成・送信、スラッシュコマンドの権限を付けます。
+Compose で起動するには Docker Compose が必要です。ホストへの Node.js と pnpm のインストールは不要です。Discord アプリでは **Message Content Intent** を有効にし、bot にメッセージの閲覧・送信、スレッド作成・送信、スラッシュコマンドの権限を付けます。
 
 1. `instances/example/.env.example` を `instances/<名前>/.env` にコピーし、`COMPOSE_PROJECT_NAME`、`INSTANCE_DIR`、管理者ユーザー ID を設定します。ユーザー ID はカンマ区切りで複数指定できます。`DISCORD_ALLOW_ALL_USERS=false`（初期値）では `DISCORD_ALLOWED_USER_IDS` と管理者だけが利用でき、許可ユーザー欄が空なら管理者だけです。`DISCORD_ALLOW_ALL_USERS=true` にすると bot が参加する全サーバーの全ユーザーが会話と `/new`・`/resume` を利用できます。`/config`・`/restart` は引き続き管理者専用です。これらのユーザー設定は全サーバーで共通です。
 2. `instances/<名前>/secrets/discord_token` と `instances/<名前>/secrets/openrouter_api_key` を作り、各ファイルに対応するトークンだけを書きます。これらのファイルと `.env` は Git の対象外です。
@@ -59,6 +59,8 @@ docker compose --env-file instances/<名前>/.env logs -f bot agent
 プラグインのコードはイメージに含めます。自作プラグインは `plugins/local`、採用する既存 package はルートの `package.json` と `config/pi-packages.json` で固定します。プラグイン固有の設定ファイルの場所は各 package の仕様に従います。
 
 ## 開発
+
+以下のコマンドをホストで実行する場合は、Node.js 24.15 以上と pnpm 11 が必要です。
 
 ```sh
 pnpm install
