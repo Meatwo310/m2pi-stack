@@ -13,7 +13,6 @@ import { AgentClient } from "./agent-client.js";
 import { defaults, selectTrigger, settingKeys, type Scope, type ScopeKind, type SettingKey } from "./config.js";
 import { BotDb } from "./db.js";
 
-const guildId = required("DISCORD_GUILD_ID");
 const admins = new Set(required("DISCORD_ADMIN_USER_IDS").split(",").map((id) => id.trim()).filter(Boolean));
 const allowedUsers = new Set([...admins, ...(process.env.DISCORD_ALLOWED_USER_IDS ?? "").split(",").map((id) => id.trim()).filter(Boolean)]);
 const tokenPath = required("DISCORD_TOKEN_FILE");
@@ -64,7 +63,7 @@ async function serial<T>(key: string, work: () => Promise<T>): Promise<T> {
   finally { if (pending.get(key) === task) pending.delete(key); }
 }
 
-function conversationKey(channelId: string): string { return `${guildId}:${channelId}`; }
+function conversationKey(guildId: string, channelId: string): string { return `${guildId}:${channelId}`; }
 
 async function context(guild: Guild, channelId: string): Promise<{
   isThread: boolean; parentChannelId: string; categoryId: string | null; managed: boolean;
@@ -79,7 +78,7 @@ async function context(guild: Guild, channelId: string): Promise<{
   return { isThread, parentChannelId, categoryId, managed: isThread && db.isManagedThread(channelId) };
 }
 
-function scopes(info: Awaited<ReturnType<typeof context>>, sessionId: string | null): Scope[] {
+function scopes(guildId: string, info: Awaited<ReturnType<typeof context>>, sessionId: string | null): Scope[] {
   const result: Scope[] = [];
   if (sessionId) result.push({ kind: "session", id: sessionId });
   result.push({ kind: "channel", id: info.parentChannelId });
@@ -108,15 +107,15 @@ function pieces(text: string): string[] {
 }
 
 client.on("messageCreate", (message) => {
-  if (!message.inGuild() || message.guildId !== guildId || message.author.bot || !allowedUsers.has(message.author.id) || message.type === MessageType.ThreadStarterMessage) return;
+  if (!message.inGuild() || message.author.bot || !allowedUsers.has(message.author.id) || message.type === MessageType.ThreadStarterMessage) return;
   void handleMessage(message).catch((error) => console.error("message error", error));
 });
 
 async function handleMessage(message: Message<true>): Promise<void> {
   const info = await context(message.guild, message.channelId);
-  const key = conversationKey(message.channelId);
+  const key = conversationKey(message.guildId, message.channelId);
   const activeId = db.getActive(key);
-  const effective = db.resolve(scopes(info, activeId)).values;
+  const effective = db.resolve(scopes(message.guildId, info, activeId)).values;
   const mode = selectTrigger(effective, info.isThread, info.managed);
   if (mode === "off" || (mode === "mention" && !message.mentions.has(client.user!.id))) return;
   const prompt = promptFrom(message);
@@ -137,11 +136,11 @@ async function handleMessage(message: Message<true>): Promise<void> {
     destination = thread;
     destinationId = thread.id;
   }
-  const targetKey = conversationKey(destinationId);
+  const targetKey = conversationKey(message.guildId, destinationId);
   await serial(targetKey, async () => {
     const targetInfo = destinationId === message.channelId ? info : await context(message.guild, destinationId);
     const currentId = db.getActive(targetKey);
-    const model = db.resolve(scopes(targetInfo, currentId)).values.model;
+    const model = db.resolve(scopes(message.guildId, targetInfo, currentId)).values.model;
     await destination.sendTyping();
     const typing = setInterval(() => { void destination.sendTyping().catch(() => undefined); }, 8000);
     try {
@@ -161,9 +160,9 @@ async function handleMessage(message: Message<true>): Promise<void> {
 
 async function targetScope(interaction: ChatInputCommandInteraction<"cached">, kind: ScopeKind): Promise<Scope> {
   if (kind === "instance") return { kind, id: "default" };
-  if (kind === "guild") return { kind, id: guildId };
+  if (kind === "guild") return { kind, id: interaction.guildId };
   if (kind === "session") {
-    const id = db.getActive(conversationKey(interaction.channelId));
+    const id = db.getActive(conversationKey(interaction.guildId, interaction.channelId));
     if (!id) throw new Error("この場所にはアクティブなセッションがありません");
     return { kind, id };
   }
@@ -176,7 +175,7 @@ async function targetScope(interaction: ChatInputCommandInteraction<"cached">, k
 }
 
 client.on("interactionCreate", (interaction) => {
-  if (!interaction.isChatInputCommand() || !interaction.inCachedGuild() || interaction.guildId !== guildId) return;
+  if (!interaction.isChatInputCommand() || !interaction.inCachedGuild()) return;
   void handleCommand(interaction).catch(async (error) => {
     console.error("command error", error);
     const content = error instanceof Error ? error.message : "コマンドに失敗しました";
@@ -197,7 +196,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction<"cached">)
     await interaction.reply({ content: "管理者専用コマンドです", ephemeral: true });
     return;
   }
-  const key = conversationKey(interaction.channelId);
+  const key = conversationKey(interaction.guildId, interaction.channelId);
   if (command === "new") {
     await interaction.deferReply({ ephemeral: true });
     await serial(key, async () => db.clearActive(key));
@@ -234,7 +233,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction<"cached">)
     const action = interaction.options.getSubcommand();
     if (action === "show") {
       const info = await context(interaction.guild, interaction.channelId);
-      const effective = db.resolve(scopes(info, db.getActive(key)));
+      const effective = db.resolve(scopes(interaction.guildId, info, db.getActive(key)));
       const lines = settingKeys.map((item) => {
         const source = effective.sources[item];
         return `${item}: \`${effective.values[item]}\` ← ${source === "default" ? "default" : `${source.kind}:${source.id}`}`;
@@ -256,10 +255,24 @@ async function handleCommand(interaction: ChatInputCommandInteraction<"cached">)
   }
 }
 
-client.once("ready", async () => {
-  const guild = await client.guilds.fetch(guildId);
+async function registerCommands(guild: Guild): Promise<void> {
   await guild.commands.set(commands.map((command) => command.toJSON()));
-  console.log(`ready as ${client.user?.tag}; guild ${guildId}; default model ${defaults.model}`);
+}
+
+client.on("guildCreate", (guild) => {
+  if (!client.isReady()) return;
+  void registerCommands(guild).catch((error) => console.error(`command registration error for guild ${guild.id}`, error));
+});
+
+client.once("ready", async () => {
+  const guilds = [...client.guilds.cache.values()];
+  const results = await Promise.allSettled(guilds.map(registerCommands));
+  for (const [index, result] of results.entries()) {
+    if (result.status === "rejected") {
+      console.error(`command registration error for guild ${guilds[index]!.id}`, result.reason);
+    }
+  }
+  console.log(`ready as ${client.user?.tag}; guilds ${client.guilds.cache.size}; default model ${defaults.model}`);
 });
 
 const token = readFileSync(tokenPath, "utf8").trim();

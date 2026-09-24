@@ -9,7 +9,6 @@ services:
       agent:
         condition: service_healthy
     environment:
-      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:?Set DISCORD_GUILD_ID}
       DISCORD_ADMIN_USER_IDS: ${DISCORD_ADMIN_USER_IDS:?Set DISCORD_ADMIN_USER_IDS}
       DISCORD_ALLOWED_USER_IDS: ${DISCORD_ALLOWED_USER_IDS:-}
       DISCORD_TOKEN_FILE: /run/secrets/discord_token

@@ -2,7 +2,7 @@
 
 ## 配置と権限
 
-1 Guild を 1 Compose プロジェクトとして起動します。`bot` は Discord トークンと SQLite volume だけを持ちます。`agent` は Pi SDK、OpenRouter キー、Pi 状態 volume、作業 volume を持ち、Compose ネットワーク上の HTTP API を bot に提供します。agent のポートはホストに公開しません。
+1 つの Compose プロジェクトで、bot が参加する複数の Guild を扱います。会話と Guild 単位の設定は Guild ID で区別し、管理者・利用者 ID と Pi の作業領域は共有します。`bot` は Discord トークンと SQLite volume だけを持ちます。`agent` は Pi SDK、OpenRouter キー、Pi 状態 volume、作業 volume を持ち、Compose ネットワーク上の HTTP API を bot に提供します。agent のポートはホストに公開しません。
 
 この分離により、Pi の `bash` や拡張が bot の Discord トークンを直接読むことを防ぎます。Pi にホストの Docker socket は渡しません。将来の `/sudo` によるローカル実行は、別の権限経路として設計します。現時点で bot のコード更新やホスト操作はできません。
 Pi を呼び出せるユーザーは `DISCORD_ALLOWED_USER_IDS` と管理者 ID に限定し、追加指定がなければ管理者のみとします。Pi の作業用コンテナにはモデル認証情報があるため、利用者は信頼できるアカウントに限定します。
