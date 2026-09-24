@@ -10,6 +10,7 @@ services:
         condition: service_healthy
     environment:
       DISCORD_ADMIN_USER_IDS: ${DISCORD_ADMIN_USER_IDS:?Set DISCORD_ADMIN_USER_IDS}
+      DISCORD_ALLOW_ALL_USERS: ${DISCORD_ALLOW_ALL_USERS:-false}
       DISCORD_ALLOWED_USER_IDS: ${DISCORD_ALLOWED_USER_IDS:-}
       DISCORD_TOKEN_FILE: /run/secrets/discord_token
       M2PI_AGENT_URL: http://agent:8787

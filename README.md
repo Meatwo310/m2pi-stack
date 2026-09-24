@@ -6,7 +6,7 @@ Pi Agent を Discord から使うための Compose スタックです。1 つの
 
 Node.js 24.15 以上、pnpm 11、Docker Compose が必要です。Discord アプリでは **Message Content Intent** を有効にし、bot にメッセージの閲覧・送信、スレッド作成・送信、スラッシュコマンドの権限を付けます。
 
-1. `instances/example/.env.example` を `instances/<名前>/.env` にコピーし、`COMPOSE_PROJECT_NAME`、`INSTANCE_DIR`、管理者ユーザー ID を設定します。ユーザー ID はカンマ区切りで複数指定できます。`DISCORD_ALLOWED_USER_IDS` が空なら管理者だけが会話できます。これらのユーザー設定は bot が参加する全サーバーで共通です。
+1. `instances/example/.env.example` を `instances/<名前>/.env` にコピーし、`COMPOSE_PROJECT_NAME`、`INSTANCE_DIR`、管理者ユーザー ID を設定します。ユーザー ID はカンマ区切りで複数指定できます。`DISCORD_ALLOW_ALL_USERS=false`（初期値）では `DISCORD_ALLOWED_USER_IDS` と管理者だけが利用でき、許可ユーザー欄が空なら管理者だけです。`DISCORD_ALLOW_ALL_USERS=true` にすると bot が参加する全サーバーの全ユーザーが会話と `/new`・`/resume` を利用できます。`/config`・`/restart` は引き続き管理者専用です。これらのユーザー設定は全サーバーで共通です。
 2. `instances/<名前>/secrets/discord_token` と `instances/<名前>/secrets/openrouter_api_key` を作り、各ファイルに対応するトークンだけを書きます。これらのファイルと `.env` は Git の対象外です。
 3. リポジトリのルートから起動します。
 
@@ -15,6 +15,8 @@ docker compose --env-file instances/<名前>/.env up -d --build
 ```
 
 更新後は同じコマンドで再ビルドできます。イメージを変更していなければ `--build` は省略できます。bot が参加するサーバーでは同じインスタンスを利用し、会話とギルド単位の設定はサーバーごとに区別します。Pi の作業領域と agent の状態は共有されます。分離したい場合は、別の Discord bot と Compose インスタンスを用意します。
+
+全ユーザーに開放する場合は、使用中の `instances/<名前>/.env` に `DISCORD_ALLOW_ALL_USERS=true` を指定して再ビルド・再起動してください。`DISCORD_ALLOWED_USER_IDS` はこの設定が `true` の場合は利用判定に影響しません。メッセージへの反応は各チャンネルの `channel_trigger` 設定と bot の Discord 権限にも従います。
 
 ```sh
 docker compose --env-file instances/<名前>/.env ps

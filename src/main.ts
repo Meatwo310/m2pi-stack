@@ -11,6 +11,7 @@ import {
   type Message,
 } from "discord.js";
 import { AgentClient } from "./agent-client.js";
+import { allowAllUsers, canUseBot } from "./access.js";
 import { defaults, selectTrigger, settingKeys, type Scope, type ScopeKind, type SettingKey } from "./config.js";
 import { BotDb } from "./db.js";
 import { progressPages, textPages, type ProgressEntry } from "./progress-format.js";
@@ -18,6 +19,7 @@ import { appendThinkingLines, completedThinkingLines } from "./thinking-lines.js
 
 const admins = new Set(required("DISCORD_ADMIN_USER_IDS").split(",").map((id) => id.trim()).filter(Boolean));
 const allowedUsers = new Set([...admins, ...(process.env.DISCORD_ALLOWED_USER_IDS ?? "").split(",").map((id) => id.trim()).filter(Boolean)]);
+const allowAll = allowAllUsers(process.env.DISCORD_ALLOW_ALL_USERS);
 const tokenPath = required("DISCORD_TOKEN_FILE");
 const db = new BotDb(process.env.M2PI_DB_PATH ?? "/data/app.db");
 const agent = new AgentClient(required("M2PI_AGENT_URL"));
@@ -111,7 +113,7 @@ function pieces(text: string): string[] {
 }
 
 client.on("messageCreate", (message) => {
-  if (!message.inGuild() || message.author.bot || !allowedUsers.has(message.author.id) || message.type === MessageType.ThreadStarterMessage) return;
+  if (!message.inGuild() || message.author.bot || !canUseBot(message.author.id, allowAll, allowedUsers) || message.type === MessageType.ThreadStarterMessage) return;
   void handleMessage(message).catch((error) => console.error("message error", error));
 });
 
@@ -342,7 +344,7 @@ client.on("interactionCreate", (interaction) => {
 
 async function handleCommand(interaction: ChatInputCommandInteraction<"cached">): Promise<void> {
   const command = interaction.commandName;
-  if (!allowedUsers.has(interaction.user.id)) {
+  if (!canUseBot(interaction.user.id, allowAll, allowedUsers)) {
     await interaction.reply({ content: "この bot の利用は許可されていません", ephemeral: true });
     return;
   }
