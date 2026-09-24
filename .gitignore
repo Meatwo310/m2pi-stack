@@ -1,6 +1,8 @@
 node_modules/
 dist/
 .env
+instances/*/
+!instances/example/
 instances/*/.env
 instances/*/secrets/
 instances/*/data/
