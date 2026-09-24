@@ -354,13 +354,13 @@ async function handleCommand(interaction: ChatInputCommandInteraction<"cached">)
   }
   const key = conversationKey(interaction.guildId, interaction.channelId);
   if (command === "new") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply();
     await serial(key, async () => db.clearActive(key));
     await interaction.editReply("次のメッセージから新しいセッションを開始します");
     return;
   }
   if (command === "resume") {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply();
     const requested = interaction.options.getString("session");
     if (!requested) {
       const current = db.getActive(key);
@@ -373,7 +373,8 @@ async function handleCommand(interaction: ChatInputCommandInteraction<"cached">)
       return;
     }
     if (!db.hasSession(key, requested) || !(await agent.exists(requested))) {
-      throw new Error("この場所のセッションが見つかりません");
+      await interaction.editReply("セッションを再開できませんでした");
+      return;
     }
     await serial(key, async () => db.setActive(key, requested));
     await interaction.editReply(`セッションを再開しました: \`${requested}\``);
@@ -381,7 +382,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction<"cached">)
   }
   if (command === "restart") {
     if (pending.size > 0) throw new Error("処理中の会話があります。完了後に再試行してください");
-    await interaction.reply({ content: "bot を再起動します", ephemeral: true });
+    await interaction.reply({ content: "bot を再起動します" });
     setTimeout(() => { client.destroy(); db.close(); process.exit(0); }, 500);
     return;
   }
