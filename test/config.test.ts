@@ -57,3 +57,23 @@ test("モデル指定は provider と ID を区別する", () => {
   assert.deepEqual(parseModel("openrouter:openrouter/free"), { provider: "openrouter", id: "openrouter/free" });
   assert.throws(() => parseModel("openrouter/free"));
 });
+
+test("進行表示の設定を検証し、階層ごとに保存する", () => {
+  const db = new BotDb(":memory:");
+  const guild: Scope = { kind: "guild", id: "g1" };
+  try {
+    db.setOverride(guild, "model_display", "requested");
+    db.setOverride(guild, "reasoning_display", "summary");
+    db.setOverride(guild, "reasoning_summary_fallback", "hide");
+    db.setOverride(guild, "tool_template", "${tool}: ${status}");
+    const values = db.resolve([guild]).values;
+    assert.equal(values.model_display, "requested");
+    assert.equal(values.reasoning_display, "summary");
+    assert.equal(values.reasoning_summary_fallback, "hide");
+    assert.equal(values.tool_template, "${tool}: ${status}");
+    assert.throws(() => db.setOverride(guild, "model_display", "verbose"));
+    assert.throws(() => db.setOverride(guild, "reasoning_template", "thought"));
+    db.resetOverride(guild, "model_display");
+    assert.equal(db.resolve([guild]).values.model_display, defaults.model_display);
+  } finally { db.close(); }
+});

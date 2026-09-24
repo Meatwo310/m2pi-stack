@@ -28,8 +28,23 @@ docker compose --env-file instances/<名前>/.env logs -f bot agent
 - `/new` は現在のチャンネルまたはスレッドのアクティブなセッションを外し、次の発話から新しい会話を始めます。
 - `/resume` はその場所の最近のセッションを表示し、`/resume session:<ID>` で再開します。
 - `/config show`、`/config set`、`/config reset` と `/restart` は `DISCORD_ADMIN_USER_IDS` に指定した管理者専用です。
+- 応答開始時に指定モデルを最初の進行メッセージへ送信し、実際のモデルが判明したらその行を編集します。思考は完成した非空行だけをまとめて表示し、ブロック終了時に改行のない末尾も表示します。本文はブロックの完成後に別メッセージで一括送信します。ツール呼び出しは Pi のイベント順に残します。長い本文は分割し、長い思考行は省略します。思考と要約の提供はモデルとプロバイダーに依存します。
 
 `/config set` では `session`、`channel`、`category`、`guild`、`instance` の階層を選びます。例えば `setting=model`、`value=openrouter:openrouter/free` と指定します。`/config reset` は下位階層からの継承に戻します。
+
+進行表示は次の設定で調整できます。テンプレートは改行なしの 1～500 文字です。設定値は `/config show` で確認できます。
+
+| 設定 | 初期値 | 値・プレースホルダー |
+| --- | --- | --- |
+| `model_display` | `route` | `off` / `requested` / `route`。`route` は実モデル判明後に矢印で追記 |
+| `model_template` | `-# 🤖 ${model}` | `${model}` が必要 |
+| `reasoning_display` | `text` | `off` / `summary` / `text`。`text` は Pi が渡す可視テキスト |
+| `reasoning_summary_fallback` | `text` | `hide` / `text`。`summary` が無い場合の表示 |
+| `reasoning_template` | `-# 🧐 ${thought}` | `${thought}` が必要 |
+| `tool_display` | `on` | `off` / `on` |
+| `tool_template` | `-# 🔧 ${tool} — ${status}` | `${tool}` と `${status}` が必要。ツールの引数と結果本文は表示しません |
+
+`reasoning.summary` が返る場合は、`reasoning_display=summary` で表示済みの思考行を要約に差し替えます。返らない場合の表示は `reasoning_summary_fallback` に従います。送信メッセージではメンションとリンクの埋め込みを無効化します。
 
 ## 保存先
 

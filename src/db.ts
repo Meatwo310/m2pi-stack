@@ -30,6 +30,15 @@ const migrations = [
      parent_channel_id TEXT NOT NULL,
      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
    ) STRICT;`,
+  `ALTER TABLE config_overrides ADD COLUMN model_display TEXT CHECK(model_display IN ('off','requested','route'));
+   ALTER TABLE config_overrides ADD COLUMN model_template TEXT;
+   ALTER TABLE config_overrides ADD COLUMN reasoning_display TEXT CHECK(reasoning_display IN ('off','summary','text'));
+   ALTER TABLE config_overrides ADD COLUMN reasoning_summary_fallback TEXT CHECK(reasoning_summary_fallback IN ('hide','text'));
+   ALTER TABLE config_overrides ADD COLUMN reasoning_template TEXT;
+   ALTER TABLE config_overrides ADD COLUMN stream_status TEXT CHECK(stream_status IN ('off','on'));
+   ALTER TABLE config_overrides ADD COLUMN stream_status_text TEXT;
+   ALTER TABLE config_overrides ADD COLUMN tool_display TEXT CHECK(tool_display IN ('off','on'));
+   ALTER TABLE config_overrides ADD COLUMN tool_template TEXT;`,
 ] as const;
 
 type ConfigRow = Partial<Record<SettingKey, string | null>>;

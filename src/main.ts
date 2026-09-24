@@ -4,6 +4,7 @@ import {
   Client,
   GatewayIntentBits,
   MessageType,
+  MessageFlags,
   SlashCommandBuilder,
   type ChatInputCommandInteraction,
   type Guild,
@@ -12,6 +13,8 @@ import {
 import { AgentClient } from "./agent-client.js";
 import { defaults, selectTrigger, settingKeys, type Scope, type ScopeKind, type SettingKey } from "./config.js";
 import { BotDb } from "./db.js";
+import { progressPages, textPages, type ProgressEntry } from "./progress-format.js";
+import { appendThinkingLines, completedThinkingLines } from "./thinking-lines.js";
 
 const admins = new Set(required("DISCORD_ADMIN_USER_IDS").split(",").map((id) => id.trim()).filter(Boolean));
 const allowedUsers = new Set([...admins, ...(process.env.DISCORD_ALLOWED_USER_IDS ?? "").split(",").map((id) => id.trim()).filter(Boolean)]);
@@ -20,6 +23,7 @@ const db = new BotDb(process.env.M2PI_DB_PATH ?? "/data/app.db");
 const agent = new AgentClient(required("M2PI_AGENT_URL"));
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
+  allowedMentions: { parse: [] },
 });
 
 function required(name: string): string {
@@ -140,14 +144,164 @@ async function handleMessage(message: Message<true>): Promise<void> {
   await serial(targetKey, async () => {
     const targetInfo = destinationId === message.channelId ? info : await context(message.guild, destinationId);
     const currentId = db.getActive(targetKey);
-    const model = db.resolve(scopes(message.guildId, targetInfo, currentId)).values.model;
+    const settings = db.resolve(scopes(message.guildId, targetInfo, currentId)).values;
+    const model = settings.model;
     await destination.sendTyping();
     const typing = setInterval(() => { void destination.sendTyping().catch(() => undefined); }, 8000);
     try {
-      const result = await agent.prompt(currentId, prompt, model);
+      type Segment = { entries: ProgressEntry[]; text?: never; messages: Message[] } |
+        { entries?: never; text: string; messages: Message[] };
+      const modelEntry: Extract<ProgressEntry, { kind: "model" }> = { kind: "model", requested: model, actual: null };
+      const modelSegment: Segment = { entries: [modelEntry], messages: [] };
+      const headers = new Map<number, Segment>([[1, modelSegment]]);
+      type ThoughtEntry = Extract<ProgressEntry, { kind: "thought" }>;
+      type ThoughtState = { header: Segment; pending: string; entries: ThoughtEntry[] };
+      const thoughts = new Map<string, ThoughtState>();
+      const texts = new Map<string, Segment>();
+      const tools = new Map<string, Segment>();
+      const headerFor = (messageId: number): Segment => {
+        let header = headers.get(messageId);
+        if (!header) {
+          header = { entries: [], messages: [] };
+          headers.set(messageId, header);
+        }
+        return header;
+      };
+      const addThought = (header: Segment, entry: ThoughtEntry): void => {
+        header.entries!.push(entry);
+      };
+      const thoughtFor = (id: string, messageId: number): ThoughtState => {
+        let state = thoughts.get(id);
+        if (!state) {
+          state = { header: headerFor(messageId), pending: "", entries: [] };
+          thoughts.set(id, state);
+        }
+        return state;
+      };
+      const addThoughtLines = (state: ThoughtState, lines: string[]): void => {
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const entry: ThoughtEntry = { kind: "thought", text: line, summary: "" };
+          state.entries.push(entry);
+          addThought(state.header, entry);
+        }
+      };
+      const replaceThoughtLines = (state: ThoughtState, lines: string[], summary = ""): void => {
+        const entries = state.header.entries!;
+        const first = state.entries.length ? entries.indexOf(state.entries[0]!) : entries.length;
+        for (const entry of state.entries) {
+          const index = entries.indexOf(entry);
+          if (index >= 0) entries.splice(index, 1);
+        }
+        state.entries = [];
+        const replacement: ThoughtEntry[] = summary
+          ? [{ kind: "thought", text: lines.join(" "), summary }]
+          : lines.filter((line) => line.trim()).map((line) => ({ kind: "thought", text: line, summary: "" }));
+        const position = first < 0 ? entries.length : first;
+        entries.splice(position, 0, ...replacement);
+        state.entries.push(...replacement);
+      };
+      const safe = { allowedMentions: { parse: [] as [] }, flags: MessageFlags.SuppressEmbeds as const };
+      const render = async (segment: Segment): Promise<void> => {
+        const pages = segment.entries ? progressPages(settings, segment.entries) : textPages(segment.text);
+        for (const [index, page] of pages.entries()) {
+          const existing = segment.messages[index];
+          if (!existing) segment.messages[index] = await destination.send({ content: page, ...safe });
+          else if (existing.content !== page) segment.messages[index] = await existing.edit({ content: page, ...safe });
+        }
+        while (segment.messages.length > pages.length) {
+          await segment.messages.at(-1)!.delete();
+          segment.messages.pop();
+        }
+      };
+      let renderQueue: Promise<void> = Promise.resolve();
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      const dirty = new Set<Segment>();
+      const flush = async (): Promise<void> => {
+        if (timer) clearTimeout(timer);
+        timer = null;
+        const batch = [...dirty];
+        dirty.clear();
+        renderQueue = renderQueue.then(async () => {
+          for (const segment of batch) await render(segment);
+        }).catch((error) => console.error("progress render error", error));
+        await renderQueue;
+      };
+      const refresh = async (segment: Segment, immediate = false): Promise<void> => {
+        dirty.add(segment);
+        if (immediate) await flush();
+        else if (!timer) {
+          timer = setTimeout(() => {
+            timer = null;
+            void flush();
+          }, 1200);
+        }
+      };
+      await refresh(modelSegment, true);
+      let result;
+      try {
+        result = await agent.prompt(currentId, prompt, model, async (event) => {
+          if (event.type === "model") {
+            modelEntry.actual = event.model;
+            await refresh(modelSegment, true);
+          } else if (event.type === "thinking") {
+            const state = thoughtFor(event.id, event.messageId);
+            const update = appendThinkingLines(state.pending, event.delta);
+            state.pending = update.pending;
+            if (update.lines.length) {
+              addThoughtLines(state, update.lines);
+              await refresh(state.header);
+            }
+          } else if (event.type === "thinking_end") {
+            const state = thoughtFor(event.id, event.messageId);
+            const lines = completedThinkingLines(event.content);
+            replaceThoughtLines(state, lines);
+            state.pending = "";
+            await refresh(state.header, true);
+          } else if (event.type === "summary") {
+            if (settings.reasoning_display === "summary") {
+              const state = thoughtFor(event.id, event.messageId);
+              replaceThoughtLines(state, state.entries.map((entry) => entry.text), event.text);
+              await refresh(state.header, true);
+            }
+          } else if (event.type === "text_start") {
+            if (!texts.has(event.id)) {
+              const segment: Segment = { text: "", messages: [] };
+              texts.set(event.id, segment);
+            }
+          } else if (event.type === "text_delta") {
+            let segment = texts.get(event.id);
+            if (!segment) {
+              segment = { text: "", messages: [] };
+              texts.set(event.id, segment);
+            }
+            segment.text += event.delta;
+          } else if (event.type === "text_end") {
+            let segment = texts.get(event.id);
+            if (!segment) {
+              segment = { text: "", messages: [] };
+              texts.set(event.id, segment);
+            }
+            segment.text = event.content;
+            await refresh(segment, true);
+          } else if (event.type === "tool") {
+            let segment = tools.get(event.id);
+            if (!segment) {
+              segment = { entries: [{ kind: "tool", id: event.id, name: event.name, status: event.status }], messages: [] };
+              tools.set(event.id, segment);
+            } else (segment.entries![0] as Extract<ProgressEntry, { kind: "tool" }>).status = event.status;
+            await refresh(segment, event.status !== "running" || segment.messages.length === 0);
+          }
+        });
+      } catch (error) {
+        await flush();
+        throw error;
+      }
       db.setActive(targetKey, result.sessionId);
-      for (const piece of pieces(result.text)) {
-        await destination.send({ content: piece, allowedMentions: { parse: [] } });
+      modelEntry.actual = result.model;
+      await refresh(modelSegment, true);
+      if (texts.size === 0) {
+        for (const piece of pieces(result.text)) await destination.send({ content: piece, ...safe });
       }
     } catch (error) {
       console.error("agent prompt error", error);
@@ -238,7 +392,9 @@ async function handleCommand(interaction: ChatInputCommandInteraction<"cached">)
         const source = effective.sources[item];
         return `${item}: \`${effective.values[item]}\` ← ${source === "default" ? "default" : `${source.kind}:${source.id}`}`;
       });
-      await interaction.reply({ content: lines.join("\n"), ephemeral: true });
+      const chunks = pieces(lines.join("\n"));
+      await interaction.reply({ content: chunks[0]!, ephemeral: true, allowedMentions: { parse: [] } });
+      for (const chunk of chunks.slice(1)) await interaction.followUp({ content: chunk, ephemeral: true, allowedMentions: { parse: [] } });
       return;
     }
     const kind = interaction.options.getString("scope", true) as ScopeKind;
