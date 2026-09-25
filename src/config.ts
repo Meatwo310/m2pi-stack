@@ -126,8 +126,8 @@ export function validateSetting(key: SettingKey, value: string): void {
     return;
   }
   if (key === "model_allowlist") {
-    if (value.length > 2000 || (value && value.split(",").some((model) => !isModelId(model.trim())))) {
-      throw new Error("model_allowlist は provider:model-id のカンマ区切りにしてください");
+    if (value.length > 2000 || parseModelAllowlist(value).some((model) => !isModelId(model))) {
+      throw new Error("model_allowlist は provider:model-id を1行ずつ入力してください");
     }
     return;
   }
@@ -139,7 +139,11 @@ export function validateSetting(key: SettingKey, value: string): void {
 function isModelId(value: string): boolean { return /^[a-z0-9_-]+:[^\s,]+$/i.test(value); }
 
 export function allowedModels(settings: Settings): string[] {
-  return settings.model_allowlist ? settings.model_allowlist.split(",").map((model) => model.trim()) : [];
+  return parseModelAllowlist(settings.model_allowlist);
+}
+
+export function parseModelAllowlist(value: string): string[] {
+  return value.split(/,|\r\n|\r|\n/).map((model) => model.trim()).filter(Boolean);
 }
 
 export function canSelectModel(settings: Settings, model: string): boolean {

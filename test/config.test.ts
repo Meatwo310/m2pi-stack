@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { canSelectModel, defaults, parseModel, requiredPlaceholders, selectTrigger, settingChoiceLabels, settingChoices, settingGroups, settingKeys, settingLabels, settingValueLabel, validateSetting, type Scope } from "../src/config.ts";
+import { allowedModels, canSelectModel, defaults, parseModel, requiredPlaceholders, selectTrigger, settingChoiceLabels, settingChoices, settingGroups, settingKeys, settingLabels, settingValueLabel, validateSetting, type Scope } from "../src/config.ts";
 import { BotDb } from "../src/db.ts";
 
 test("設定パネルのカテゴリと選択肢は検証対象を網羅する", () => {
@@ -108,13 +108,20 @@ test("モデル変更権限と許可リストを階層ごとに解決する", ()
   try {
     assert.equal(canSelectModel(defaults, "openrouter:openrouter/free"), true);
     assert.equal(canSelectModel(defaults, "openrouter:other/model"), false);
-    db.setOverride(guild, "model_allowlist", "openrouter:other/model, openrouter:openrouter/free");
+    assert.deepEqual(allowedModels({ ...defaults, model_allowlist: "openrouter:other/model, openrouter:openrouter/free" }),
+      ["openrouter:other/model", "openrouter:openrouter/free"]);
+    db.setOverride(guild, "model_allowlist", "openrouter:other/model\r\nopenrouter:openrouter/free\n");
+    assert.equal(db.getOverride(guild, "model_allowlist"), "openrouter:other/model\nopenrouter:openrouter/free");
+    assert.deepEqual(allowedModels(db.resolve([channel, guild]).values), ["openrouter:other/model", "openrouter:openrouter/free"]);
     assert.equal(canSelectModel(db.resolve([channel, guild]).values, "openrouter:other/model"), true);
+    db.setOverride(guild, "model_allowlist", "openrouter:other/model, openrouter:openrouter/free");
+    assert.equal(db.getOverride(guild, "model_allowlist"), "openrouter:other/model\nopenrouter:openrouter/free");
     db.setOverride(channel, "model_permission", "none");
     assert.equal(canSelectModel(db.resolve([channel, guild]).values, "openrouter:other/model"), false);
     db.setOverride(channel, "model_permission", "all");
     assert.equal(canSelectModel(db.resolve([channel, guild]).values, "openrouter:unlisted/model"), true);
     assert.throws(() => db.setOverride(guild, "model_allowlist", "bad-model"));
+    assert.throws(() => db.setOverride(guild, "model_allowlist", "openrouter:other/model\ninvalid"));
     assert.throws(() => db.setOverride(guild, "model_permission", "everyone"));
   } finally { db.close(); }
 });

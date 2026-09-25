@@ -35,7 +35,7 @@ docker compose --env-file instances/<名前>/.env logs -f bot agent
 
 Discord のサブコマンド仕様により、`/config` だけでパネルを開くことはできません。既存の `set`・`reset` を維持するため、`/config panel` を入口にしています。`/config set` では `session`、`channel`、`category`、`guild`、`instance` の階層を選びます。例えば `setting=model`、`value=openrouter:openrouter/free` と指定します。`/config reset` は選んだ階層の上書きを消して継承に戻します。
 
-`model_permission` は一般ユーザーの `/model` 変更権限で、`none`（禁止）、`list`（許可リストのみ）、`all`（全モデル）から選びます。初期値は `list` です。`model_allowlist` は `provider:model-id` のカンマ区切りで、初期値は `openrouter:openrouter/free` だけです。両方とも `/config set` で階層ごとに上書きできます。管理者は権限設定によらずモデルを指定できます。ピッカーには最大 25 件を表示し、`all` の場合もそれ以外のモデルは直接指定できます。
+`model_permission` は一般ユーザーの `/model` 変更権限で、`none`（禁止）、`list`（許可リストのみ）、`all`（全モデル）から選びます。初期値は `list` です。`model_allowlist` は `provider:model-id` を1行に1つ入力し、初期値は `openrouter:openrouter/free` だけです。両方とも `/config set` で階層ごとに上書きできます。管理者は権限設定によらずモデルを指定できます。ピッカーには最大 25 件を表示し、`all` の場合もそれ以外のモデルは直接指定できます。
 
 進行表示は次の設定で調整できます。テンプレートは改行なしの 1～500 文字です。設定値は `/config show` で確認できます。
 

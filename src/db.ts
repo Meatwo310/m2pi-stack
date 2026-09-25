@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { defaults, settingKeys, validateSetting, type Scope, type SettingKey, type Settings } from "./config.js";
+import { defaults, parseModelAllowlist, settingKeys, validateSetting, type Scope, type SettingKey, type Settings } from "./config.js";
 
 const migrations = [
   `CREATE TABLE config_overrides (
@@ -91,6 +91,7 @@ export class BotDb {
       throw new Error("conversation_target はセッション作成前に決まるため、session には設定できません");
     }
     validateSetting(key, value);
+    if (key === "model_allowlist") value = parseModelAllowlist(value).join("\n");
     this.db.prepare("INSERT OR IGNORE INTO config_overrides (scope_kind, scope_id) VALUES (?, ?)").run(scope.kind, scope.id);
     this.db.prepare(`UPDATE config_overrides SET ${key} = ? WHERE scope_kind = ? AND scope_id = ?`)
       .run(value, scope.kind, scope.id);

@@ -23,7 +23,7 @@ import {
 } from "discord.js";
 import { AgentClient } from "./agent-client.js";
 import { allowAllUsers, canUseBot } from "./access.js";
-import { allowedModels, canSelectModel, defaults, requiredPlaceholders, selectTrigger, settingChoices, settingGroups, settingKeys, settingLabels, settingValueLabel, type Scope, type ScopeKind, type SettingGroup, type SettingKey, type Settings } from "./config.js";
+import { allowedModels, canSelectModel, defaults, parseModelAllowlist, requiredPlaceholders, selectTrigger, settingChoices, settingGroups, settingKeys, settingLabels, settingValueLabel, type Scope, type ScopeKind, type SettingGroup, type SettingKey, type Settings } from "./config.js";
 import { BotDb } from "./db.js";
 import { progressPages, textPages, type ProgressEntry } from "./progress-format.js";
 import { appendThinkingLines, completedThinkingLines } from "./thinking-lines.js";
@@ -364,6 +364,19 @@ function isScopeKind(value: string): value is ScopeKind { return (scopeChoices a
 function sourceLabel(source: Scope | "default"): string { return source === "default" ? "初期値" : scopeLabels[source.kind]; }
 function shortValue(value: string, limit = 180): string { return value.length > limit ? `${value.slice(0, limit - 1)}…` : value; }
 function configValue(key: SettingKey, value: string, limit = 180): string {
+  if (key === "model_allowlist") {
+    const models = parseModelAllowlist(value);
+    if (!models.length) return "（なし）";
+    const lines: string[] = [];
+    let remaining = limit;
+    for (const model of models) {
+      if (lines.length && model.length > remaining) break;
+      lines.push(`• \`${shortValue(model, remaining).replaceAll("`", "ˋ")}\``);
+      remaining -= model.length;
+    }
+    if (lines.length < models.length) lines.push("…");
+    return lines.join("\n");
+  }
   const label = settingValueLabel(key, value);
   return label === value ? `\`${shortValue(value, limit).replaceAll("`", "ˋ")}\`` : `${label}（\`${value}\`）`;
 }
@@ -380,13 +393,17 @@ async function configView(interaction: ConfigInteraction, kind: ScopeKind, group
   if (!group) {
     embed.addFields(groupNames.map((name) => ({
       name: settingGroups[name].label,
-      value: settingGroups[name].keys.map((key) => `**${settingLabels[key]}**: ${configValue(key, resolved.values[key], 70)} ← ${sourceLabel(resolved.sources[key])}`).join("\n"),
+      value: settingGroups[name].keys.map((key) => key === "model_allowlist"
+        ? `**${settingLabels[key]}**:\n${configValue(key, resolved.values[key], 70)}\n← ${sourceLabel(resolved.sources[key])}`
+        : `**${settingLabels[key]}**: ${configValue(key, resolved.values[key], 70)} ← ${sourceLabel(resolved.sources[key])}`).join("\n"),
     })));
   } else {
     const keys = settingGroups[group].keys;
     embed.addFields({ name: "カテゴリ", value: settingGroups[group].label });
     for (const key of keys) {
-      embed.addFields({ name: key === item ? `▶ ${settingLabels[key]}` : settingLabels[key], value: `${configValue(key, resolved.values[key])} ← ${sourceLabel(resolved.sources[key])}`, inline: false });
+      embed.addFields({ name: key === item ? `▶ ${settingLabels[key]}` : settingLabels[key], value: key === "model_allowlist"
+        ? `${configValue(key, resolved.values[key])}\n← ${sourceLabel(resolved.sources[key])}`
+        : `${configValue(key, resolved.values[key])} ← ${sourceLabel(resolved.sources[key])}`, inline: false });
     }
   }
   const components: ConfigView["components"] = [];
@@ -440,10 +457,10 @@ async function handleConfigComponent(interaction: StringSelectMenuInteraction<"c
     const scope = available.find((candidate) => candidate.kind === kind);
     if (!scope) throw new Error("この設定先は現在選べません");
     const current = db.resolve(available.slice(available.indexOf(scope))).values[item];
-    const hint = item === "model" ? "例: openrouter:openrouter/free" : item === "model_allowlist" ? "例: openrouter:openrouter/free,openai:gpt-4.1" : `必須: ${requiredPlaceholders[item]?.join("、") ?? ""}`;
+    const hint = item === "model" ? "例: openrouter:openrouter/free" : item === "model_allowlist" ? "モデルを1行に1つ入力（例: openrouter:openrouter/free）" : `必須: ${requiredPlaceholders[item]?.join("、") ?? ""}`;
     const input = new TextInputBuilder().setCustomId("value").setLabel(settingLabels[item]).setStyle(item === "model_allowlist" ? TextInputStyle.Paragraph : TextInputStyle.Short)
       .setRequired(item !== "model_allowlist").setMaxLength(item === "model_allowlist" ? 2000 : item === "model" ? 100 : 500)
-      .setPlaceholder(hint.slice(0, 100)).setValue(current.slice(0, item === "model_allowlist" ? 2000 : item === "model" ? 100 : 500));
+      .setPlaceholder(hint.slice(0, 100)).setValue((item === "model_allowlist" ? parseModelAllowlist(current).join("\n") : current).slice(0, item === "model_allowlist" ? 2000 : item === "model" ? 100 : 500));
     await interaction.showModal(new ModalBuilder().setCustomId(`config:modal:${kind}:${group}:${item}`)
       .setTitle(`${settingLabels[item]}を設定`.slice(0, 45)).addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(input)));
     return;

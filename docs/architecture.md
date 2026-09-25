@@ -28,7 +28,7 @@ session → channel → category → guild → instance → コード上の初�
 | `conversation_target` | `direct` / `new_thread` | `direct` |
 | `model` | `provider:model-id` | `openrouter:openrouter/free` |
 | `model_permission` | `none` / `list` / `all` | `list` |
-| `model_allowlist` | `provider:model-id` のカンマ区切り | `openrouter:openrouter/free` |
+| `model_allowlist` | `provider:model-id` を1行に1つ | `openrouter:openrouter/free` |
 
 bot が作ったスレッドの ID は `managed_threads` に保存します。既存スレッドで一度呼ばれても managed には変わりません。`new_thread` は通常チャンネルのメッセージから起動した会話に適用し、スレッド内ではそのスレッドで続けます。
 
