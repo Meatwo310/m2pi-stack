@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { canSelectModel, defaults, parseModel, requiredPlaceholders, selectTrigger, settingChoices, settingGroups, settingKeys, validateSetting, type Scope } from "../src/config.ts";
+import { canSelectModel, defaults, parseModel, requiredPlaceholders, selectTrigger, settingChoiceLabels, settingChoices, settingGroups, settingKeys, settingLabels, settingValueLabel, validateSetting, type Scope } from "../src/config.ts";
 import { BotDb } from "../src/db.ts";
 
 test("設定パネルのカテゴリと選択肢は検証対象を網羅する", () => {
@@ -8,10 +8,17 @@ test("設定パネルのカテゴリと選択肢は検証対象を網羅する",
   assert.deepEqual([...grouped].sort(), [...settingKeys].sort());
   assert.equal(new Set(grouped).size, settingKeys.length);
   for (const key of settingKeys) {
+    assert.ok(settingLabels[key]);
+    assert.ok(settingLabels[key].length <= 100);
     const choices = settingChoices[key];
     if (choices) {
       assert.ok(choices.length > 0);
-      for (const choice of choices) assert.doesNotThrow(() => validateSetting(key, choice));
+      for (const choice of choices) {
+        assert.doesNotThrow(() => validateSetting(key, choice));
+        assert.ok(settingChoiceLabels[key]?.[choice]);
+        assert.notEqual(settingValueLabel(key, choice), choice);
+      }
+      assert.deepEqual(Object.keys(settingChoiceLabels[key] ?? {}).sort(), [...choices].sort());
       assert.throws(() => validateSetting(key, "invalid-choice"));
     } else if (requiredPlaceholders[key]) {
       assert.throws(() => validateSetting(key, "placeholder missing"));

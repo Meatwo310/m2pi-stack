@@ -23,7 +23,7 @@ import {
 } from "discord.js";
 import { AgentClient } from "./agent-client.js";
 import { allowAllUsers, canUseBot } from "./access.js";
-import { allowedModels, canSelectModel, defaults, requiredPlaceholders, selectTrigger, settingChoices, settingGroups, settingKeys, type Scope, type ScopeKind, type SettingGroup, type SettingKey, type Settings } from "./config.js";
+import { allowedModels, canSelectModel, defaults, requiredPlaceholders, selectTrigger, settingChoices, settingGroups, settingKeys, settingLabels, settingValueLabel, type Scope, type ScopeKind, type SettingGroup, type SettingKey, type Settings } from "./config.js";
 import { BotDb } from "./db.js";
 import { progressPages, textPages, type ProgressEntry } from "./progress-format.js";
 import { appendThinkingLines, completedThinkingLines } from "./thinking-lines.js";
@@ -45,7 +45,7 @@ function required(name: string): string {
   return value;
 }
 
-const settingOptions = settingKeys.map((key) => ({ name: key, value: key }));
+const settingOptions = settingKeys.map((key) => ({ name: settingLabels[key], value: key }));
 const scopeChoices: Array<{ name: ScopeKind; value: ScopeKind }> = [
   { name: "session", value: "session" },
   { name: "channel", value: "channel" },
@@ -362,7 +362,11 @@ function isGroup(value: string): value is SettingGroup { return value in setting
 function isSetting(value: string): value is SettingKey { return (settingKeys as readonly string[]).includes(value); }
 function isScopeKind(value: string): value is ScopeKind { return (scopeChoices as Array<{ value: string }>).some((scope) => scope.value === value); }
 function sourceLabel(source: Scope | "default"): string { return source === "default" ? "初期値" : scopeLabels[source.kind]; }
-function shortValue(value: string): string { return value.length > 180 ? `${value.slice(0, 177)}…` : value; }
+function shortValue(value: string, limit = 180): string { return value.length > limit ? `${value.slice(0, limit - 1)}…` : value; }
+function configValue(key: SettingKey, value: string, limit = 180): string {
+  const label = settingValueLabel(key, value);
+  return label === value ? `\`${shortValue(value, limit).replaceAll("`", "ˋ")}\`` : `${label}（\`${value}\`）`;
+}
 
 async function configView(interaction: ConfigInteraction, kind: ScopeKind, group: SettingGroup | null, item: SettingKey | null, notice?: string): Promise<ConfigView> {
   const info = await context(interaction.guild, interaction.channelId!);
@@ -376,14 +380,13 @@ async function configView(interaction: ConfigInteraction, kind: ScopeKind, group
   if (!group) {
     embed.addFields(groupNames.map((name) => ({
       name: settingGroups[name].label,
-      value: settingGroups[name].keys.map((key) => `**${key}**: \`${shortValue(resolved.values[key]).slice(0, 70).replaceAll("`", "ˋ")}\` ← ${sourceLabel(resolved.sources[key])}`).join("\n"),
+      value: settingGroups[name].keys.map((key) => `**${settingLabels[key]}**: ${configValue(key, resolved.values[key], 70)} ← ${sourceLabel(resolved.sources[key])}`).join("\n"),
     })));
   } else {
     const keys = settingGroups[group].keys;
     embed.addFields({ name: "カテゴリ", value: settingGroups[group].label });
     for (const key of keys) {
-      const value = shortValue(resolved.values[key]);
-      embed.addFields({ name: key === item ? `▶ ${key}` : key, value: `\`${value.replaceAll("`", "ˋ")}\` ← ${sourceLabel(resolved.sources[key])}`, inline: false });
+      embed.addFields({ name: key === item ? `▶ ${settingLabels[key]}` : settingLabels[key], value: `${configValue(key, resolved.values[key])} ← ${sourceLabel(resolved.sources[key])}`, inline: false });
     }
   }
   const components: ConfigView["components"] = [];
@@ -400,7 +403,7 @@ async function configView(interaction: ConfigInteraction, kind: ScopeKind, group
     components.push(new ActionRowBuilder<ButtonBuilder | StringSelectMenuBuilder>().addComponents(
       new StringSelectMenuBuilder().setCustomId(`config:item:${kind}:${group}`).setPlaceholder("設定項目を選択")
         .addOptions(settingGroups[group].keys.filter((key) => kind !== "session" || key !== "conversation_target")
-          .map((key) => ({ label: key, value: key, default: key === item }))),
+          .map((key) => ({ label: settingLabels[key], value: key, default: key === item }))),
     ));
   }
   if (group && item) {
@@ -408,7 +411,7 @@ async function configView(interaction: ConfigInteraction, kind: ScopeKind, group
     if (choices) {
       components.push(new ActionRowBuilder<ButtonBuilder | StringSelectMenuBuilder>().addComponents(
         new StringSelectMenuBuilder().setCustomId(`config:value:${kind}:${group}:${item}`).setPlaceholder("値を選択して反映")
-          .addOptions(choices.map((value) => ({ label: value, value, default: value === resolved.values[item] }))),
+          .addOptions(choices.map((value) => ({ label: settingValueLabel(item, value), value, default: value === resolved.values[item] }))),
       ));
     } else {
       components.push(new ActionRowBuilder<ButtonBuilder | StringSelectMenuBuilder>().addComponents(
@@ -438,11 +441,11 @@ async function handleConfigComponent(interaction: StringSelectMenuInteraction<"c
     if (!scope) throw new Error("この設定先は現在選べません");
     const current = db.resolve(available.slice(available.indexOf(scope))).values[item];
     const hint = item === "model" ? "例: openrouter:openrouter/free" : item === "model_allowlist" ? "例: openrouter:openrouter/free,openai:gpt-4.1" : `必須: ${requiredPlaceholders[item]?.join("、") ?? ""}`;
-    const input = new TextInputBuilder().setCustomId("value").setLabel(item).setStyle(item === "model_allowlist" ? TextInputStyle.Paragraph : TextInputStyle.Short)
+    const input = new TextInputBuilder().setCustomId("value").setLabel(settingLabels[item]).setStyle(item === "model_allowlist" ? TextInputStyle.Paragraph : TextInputStyle.Short)
       .setRequired(item !== "model_allowlist").setMaxLength(item === "model_allowlist" ? 2000 : item === "model" ? 100 : 500)
       .setPlaceholder(hint.slice(0, 100)).setValue(current.slice(0, item === "model_allowlist" ? 2000 : item === "model" ? 100 : 500));
     await interaction.showModal(new ModalBuilder().setCustomId(`config:modal:${kind}:${group}:${item}`)
-      .setTitle(`${item} を設定`.slice(0, 45)).addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(input)));
+      .setTitle(`${settingLabels[item]}を設定`.slice(0, 45)).addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(input)));
     return;
   }
   await interaction.deferUpdate();
@@ -471,16 +474,16 @@ async function handleConfigComponent(interaction: StringSelectMenuInteraction<"c
     if (!scope) throw new Error("この設定先は現在選べません");
     if (action === "reset" && interaction.isButton()) {
       db.resetOverride(scope, item);
-      notice = kind === "instance" ? `${item} を初期値に戻しました。` : `${item} を継承に戻しました。`;
+      notice = kind === "instance" ? `${settingLabels[item]}を初期値に戻しました。` : `${settingLabels[item]}を継承に戻しました。`;
     } else if (action === "value" && interaction.isStringSelectMenu()) {
       const value = interaction.values[0];
       if (!value || !settingChoices[item]?.includes(value)) throw new Error("設定値が無効です");
       db.setOverride(scope, item, value);
-      notice = `${item} を ${value} に設定しました。`;
+      notice = `${settingLabels[item]}を「${settingValueLabel(item, value)}」に設定しました。`;
     } else if (action === "modal" && interaction.isModalSubmit()) {
       const value = interaction.fields.getTextInputValue("value");
       db.setOverride(scope, item, value);
-      notice = `${item} を設定しました。`;
+      notice = `${settingLabels[item]}を設定しました。`;
     } else throw new Error("設定パネルを読み取れません");
   } else throw new Error("設定パネルを読み取れません");
   await interaction.editReply(await configView(interaction, nextKind, nextGroup, nextItem, notice));
@@ -644,10 +647,10 @@ async function handleCommand(interaction: ChatInputCommandInteraction<"cached">)
     if (action === "set") {
       const value = interaction.options.getString("value", true);
       db.setOverride(scope, setting, value);
-      await interaction.reply({ content: `${scope.kind}:${scope.id} の ${setting} を \`${value}\` に設定しました`, ephemeral: true });
+      await interaction.reply({ content: `${scopeLabels[scope.kind]} の ${settingLabels[setting]} を ${configValue(setting, value)} に設定しました`, ephemeral: true });
     } else {
       db.resetOverride(scope, setting);
-      await interaction.reply({ content: `${scope.kind}:${scope.id} の ${setting} を継承に戻しました`, ephemeral: true });
+      await interaction.reply({ content: `${scopeLabels[scope.kind]} の ${settingLabels[setting]} を継承に戻しました`, ephemeral: true });
     }
   }
 }
