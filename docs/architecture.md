@@ -27,10 +27,13 @@ session → channel → category → guild → instance → コード上の初�
 | `external_thread_trigger` | 同上 | `mention` |
 | `conversation_target` | `direct` / `new_thread` | `direct` |
 | `model` | `provider:model-id` | `openrouter:openrouter/free` |
+| `model_permission` | `none` / `list` / `all` | `list` |
+| `model_allowlist` | `provider:model-id` のカンマ区切り | `openrouter:openrouter/free` |
 
 bot が作ったスレッドの ID は `managed_threads` に保存します。既存スレッドで一度呼ばれても managed には変わりません。`new_thread` は通常チャンネルのメッセージから起動した会話に適用し、スレッド内ではそのスレッドで続けます。
 
 設定変更は管理者の `/config` コマンドから行います。`/config show` は有効値と取得元を表示します。マイグレーションは bot 起動時に SQLite の `user_version` に沿って適用します。
+`/model` は一般ユーザーが現在のセッションの `model` を変更するためのコマンドです。ピッカーはチャンネルに公開し、コマンド実行者以外も操作できます。変更時には操作したユーザーについて有効な `model_permission` と `model_allowlist` を確認し、管理者は制限を受けません。セッション開始前の指定は `pending_models` に保存し、作成後のセッション設定に移します。
 
 ## セッション
 

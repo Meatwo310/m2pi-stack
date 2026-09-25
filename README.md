@@ -29,10 +29,13 @@ docker compose --env-file instances/<名前>/.env logs -f bot agent
 - bot が作ったスレッドではメンションなしで会話できます。既存の別スレッドでは各メッセージでメンションが必要です。
 - `/new` は現在のチャンネルまたはスレッドのアクティブなセッションを外し、次の発話から新しい会話を始めます。
 - `/resume` はその場所の最近のセッションを表示し、`/resume session:<ID>` で再開します。
+- `/model` は現在のモデルと選択できるモデルを Embed でチャンネルに表示します。ピッカーはほかのユーザーも操作でき、選択した本人の権限を確認します。`/model name:provider:model-id` で直接指定できます。変更は現在のセッションだけに適用され、セッション開始前の指定は次に作るセッションへ適用されます。管理者以外の変更権限は設定に従います。
 - `/config show`、`/config set`、`/config reset` と `/restart` は `DISCORD_ADMIN_USER_IDS` に指定した管理者専用です。
 - 応答開始時に指定モデルを最初の進行メッセージへ送信し、実際のモデルが判明したらその行を編集します。思考は完成した非空行だけをまとめて表示し、ブロック終了時に改行のない末尾も表示します。本文はブロックの完成後に別メッセージで一括送信します。ツール呼び出しは Pi のイベント順に残します。長い本文は分割し、長い思考行は省略します。思考と要約の提供はモデルとプロバイダーに依存します。
 
 `/config set` では `session`、`channel`、`category`、`guild`、`instance` の階層を選びます。例えば `setting=model`、`value=openrouter:openrouter/free` と指定します。`/config reset` は下位階層からの継承に戻します。
+
+`model_permission` は一般ユーザーの `/model` 変更権限で、`none`（禁止）、`list`（許可リストのみ）、`all`（全モデル）から選びます。初期値は `list` です。`model_allowlist` は `provider:model-id` のカンマ区切りで、初期値は `openrouter:openrouter/free` だけです。両方とも `/config set` で階層ごとに上書きできます。管理者は権限設定によらずモデルを指定できます。ピッカーには最大 25 件を表示し、`all` の場合もそれ以外のモデルは直接指定できます。
 
 進行表示は次の設定で調整できます。テンプレートは改行なしの 1～500 文字です。設定値は `/config show` で確認できます。
 

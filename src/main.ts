@@ -1,18 +1,22 @@
 import { readFileSync } from "node:fs";
 import {
+  ActionRowBuilder,
   ChannelType,
   Client,
+  EmbedBuilder,
   GatewayIntentBits,
   MessageType,
   MessageFlags,
   SlashCommandBuilder,
+  StringSelectMenuBuilder,
   type ChatInputCommandInteraction,
   type Guild,
   type Message,
+  type StringSelectMenuInteraction,
 } from "discord.js";
 import { AgentClient } from "./agent-client.js";
 import { allowAllUsers, canUseBot } from "./access.js";
-import { defaults, selectTrigger, settingKeys, type Scope, type ScopeKind, type SettingKey } from "./config.js";
+import { allowedModels, canSelectModel, defaults, selectTrigger, settingKeys, type Scope, type ScopeKind, type SettingKey, type Settings } from "./config.js";
 import { BotDb } from "./db.js";
 import { progressPages, textPages, type ProgressEntry } from "./progress-format.js";
 import { appendThinkingLines, completedThinkingLines } from "./thinking-lines.js";
@@ -46,6 +50,8 @@ const commands = [
   new SlashCommandBuilder().setName("new").setDescription("この場所で新しい Pi セッションを開始"),
   new SlashCommandBuilder().setName("resume").setDescription("この場所の Pi セッションを一覧・再開")
     .addStringOption((option) => option.setName("session").setDescription("再開するセッション ID。省略すると一覧を表示")),
+  new SlashCommandBuilder().setName("model").setDescription("このセッションのモデルを表示・変更")
+    .addStringOption((option) => option.setName("name").setDescription("provider:model-id。省略するとモデルピッカーを表示")),
   new SlashCommandBuilder().setName("restart").setDescription("bot を再起動（管理者のみ）"),
   new SlashCommandBuilder().setName("config").setDescription("設定を表示・変更（管理者のみ）")
     .addSubcommand((sub) => sub.setName("show").setDescription("この場所の有効な設定を表示"))
@@ -139,6 +145,11 @@ async function handleMessage(message: Message<true>): Promise<void> {
       return;
     }
     db.markManagedThread(thread.id, message.channelId);
+    const pendingModel = db.getPendingModel(key);
+    if (pendingModel) {
+      db.setPendingModel(conversationKey(message.guildId, thread.id), pendingModel);
+      db.clearPendingModel(key);
+    }
     destination = thread;
     destinationId = thread.id;
   }
@@ -147,7 +158,7 @@ async function handleMessage(message: Message<true>): Promise<void> {
     const targetInfo = destinationId === message.channelId ? info : await context(message.guild, destinationId);
     const currentId = db.getActive(targetKey);
     const settings = db.resolve(scopes(message.guildId, targetInfo, currentId)).values;
-    const model = settings.model;
+    const model = currentId ? settings.model : db.getPendingModel(targetKey) ?? settings.model;
     await destination.sendTyping();
     const typing = setInterval(() => { void destination.sendTyping().catch(() => undefined); }, 8000);
     try {
@@ -300,6 +311,7 @@ async function handleMessage(message: Message<true>): Promise<void> {
         throw error;
       }
       db.setActive(targetKey, result.sessionId);
+      db.activateModel(targetKey, result.sessionId);
       modelEntry.actual = result.model;
       await refresh(modelSegment, true);
       if (texts.size === 0) {
@@ -330,7 +342,68 @@ async function targetScope(interaction: ChatInputCommandInteraction<"cached">, k
   return { kind, id: info.categoryId };
 }
 
+function modelView(settings: Settings, current: string, pending: boolean): {
+  embeds: EmbedBuilder[];
+  components: ActionRowBuilder<StringSelectMenuBuilder>[];
+} {
+  const permission = { none: "変更不可", list: "許可リストのみ", all: "全モデル" }[settings.model_permission];
+  const candidates = [...new Set([current, ...allowedModels(settings)])]
+    .filter((model) => model.length <= 100).slice(0, 25);
+  const embed = new EmbedBuilder().setTitle("モデル")
+    .addFields(
+      { name: pending ? "次のセッションのモデル" : "現在のモデル", value: `\`${current}\`` },
+      { name: "変更権限", value: permission },
+    )
+    .setDescription("モデルを直接指定するには `/model name:provider:model-id` を使ってください。選択時に操作したユーザーの権限を確認します。管理者は変更権限の制限を受けません。");
+  const components = candidates.length ? [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+    new StringSelectMenuBuilder().setCustomId("model:select").setPlaceholder("モデルを選択")
+      .addOptions(candidates.map((model) => ({ label: model.slice(0, 100), value: model, default: model === current }))),
+  )] : [];
+  return { embeds: [embed], components };
+}
+
+async function setSessionModel(guild: Guild, channelId: string, userId: string, model: string): Promise<string> {
+  const key = conversationKey(guild.id, channelId);
+  return serial(key, async () => {
+    const sessionId = db.getActive(key);
+    const info = await context(guild, channelId);
+    const settings = db.resolve(scopes(guild.id, info, sessionId)).values;
+    if (!admins.has(userId) && !canSelectModel(settings, model)) {
+      throw new Error(settings.model_permission === "none" ? "モデル変更は許可されていません" : "このモデルは許可リストにありません");
+    }
+    if (sessionId) db.setOverride({ kind: "session", id: sessionId }, "model", model);
+    else db.setPendingModel(key, model);
+    return sessionId ? "このセッション" : "次のセッション";
+  });
+}
+
+async function handleModelSelect(interaction: StringSelectMenuInteraction<"cached">): Promise<void> {
+  if (!canUseBot(interaction.user.id, allowAll, allowedUsers)) throw new Error("この bot の利用は許可されていません");
+  await interaction.deferUpdate();
+  const selected = interaction.values[0]!;
+  const target = await setSessionModel(interaction.guild, interaction.channelId, interaction.user.id, selected);
+  const key = conversationKey(interaction.guildId, interaction.channelId);
+  const sessionId = db.getActive(key);
+  const info = await context(interaction.guild, interaction.channelId);
+  const settings = db.resolve(scopes(interaction.guildId, info, sessionId)).values;
+  await interaction.editReply({ content: `${target}のモデルを \`${selected}\` に設定しました`,
+    ...modelView(settings, selected, !sessionId) });
+}
+
 client.on("interactionCreate", (interaction) => {
+  if (interaction.isStringSelectMenu() && interaction.customId === "model:select") {
+    if (!interaction.inCachedGuild()) return;
+    void handleModelSelect(interaction).catch(async (error) => {
+      console.error("model picker error", error);
+      const content = error instanceof Error ? error.message : "モデルを変更できませんでした";
+      try {
+        if (interaction.deferred || interaction.replied) await interaction.followUp({ content, ephemeral: true });
+        else await interaction.reply({ content, ephemeral: true });
+      }
+      catch (replyError) { console.error("reply error", replyError); }
+    });
+    return;
+  }
   if (!interaction.isChatInputCommand() || !interaction.inCachedGuild()) return;
   void handleCommand(interaction).catch(async (error) => {
     console.error("command error", error);
@@ -355,7 +428,7 @@ async function handleCommand(interaction: ChatInputCommandInteraction<"cached">)
   const key = conversationKey(interaction.guildId, interaction.channelId);
   if (command === "new") {
     await interaction.deferReply();
-    await serial(key, async () => db.clearActive(key));
+    await serial(key, async () => { db.clearActive(key); db.clearPendingModel(key); });
     await interaction.editReply("次のメッセージから新しいセッションを開始します");
     return;
   }
@@ -376,8 +449,23 @@ async function handleCommand(interaction: ChatInputCommandInteraction<"cached">)
       await interaction.editReply("セッションを再開できませんでした");
       return;
     }
-    await serial(key, async () => db.setActive(key, requested));
+    await serial(key, async () => { db.setActive(key, requested); db.clearPendingModel(key); });
     await interaction.editReply(`セッションを再開しました: \`${requested}\``);
+    return;
+  }
+  if (command === "model") {
+    await interaction.deferReply();
+    const requested = interaction.options.getString("name");
+    if (requested) {
+      const target = await setSessionModel(interaction.guild, interaction.channelId, interaction.user.id, requested);
+      await interaction.editReply({ content: `${target}のモデルを \`${requested}\` に設定しました` });
+      return;
+    }
+    const sessionId = db.getActive(key);
+    const info = await context(interaction.guild, interaction.channelId);
+    const settings = db.resolve(scopes(interaction.guildId, info, sessionId)).values;
+    const current = sessionId ? settings.model : db.getPendingModel(key) ?? settings.model;
+    await interaction.editReply(modelView(settings, current, !sessionId));
     return;
   }
   if (command === "restart") {

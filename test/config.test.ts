@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { defaults, parseModel, selectTrigger, type Scope } from "../src/config.ts";
+import { canSelectModel, defaults, parseModel, selectTrigger, type Scope } from "../src/config.ts";
 import { BotDb } from "../src/db.ts";
 
 test("設定は項目ごとに session → channel → category → guild → instance と継承する", () => {
@@ -75,5 +75,35 @@ test("進行表示の設定を検証し、階層ごとに保存する", () => {
     assert.throws(() => db.setOverride(guild, "reasoning_template", "thought"));
     db.resetOverride(guild, "model_display");
     assert.equal(db.resolve([guild]).values.model_display, defaults.model_display);
+  } finally { db.close(); }
+});
+
+test("モデル変更権限と許可リストを階層ごとに解決する", () => {
+  const db = new BotDb(":memory:");
+  const guild: Scope = { kind: "guild", id: "g1" };
+  const channel: Scope = { kind: "channel", id: "c1" };
+  try {
+    assert.equal(canSelectModel(defaults, "openrouter:openrouter/free"), true);
+    assert.equal(canSelectModel(defaults, "openrouter:other/model"), false);
+    db.setOverride(guild, "model_allowlist", "openrouter:other/model, openrouter:openrouter/free");
+    assert.equal(canSelectModel(db.resolve([channel, guild]).values, "openrouter:other/model"), true);
+    db.setOverride(channel, "model_permission", "none");
+    assert.equal(canSelectModel(db.resolve([channel, guild]).values, "openrouter:other/model"), false);
+    db.setOverride(channel, "model_permission", "all");
+    assert.equal(canSelectModel(db.resolve([channel, guild]).values, "openrouter:unlisted/model"), true);
+    assert.throws(() => db.setOverride(guild, "model_allowlist", "bad-model"));
+    assert.throws(() => db.setOverride(guild, "model_permission", "everyone"));
+  } finally { db.close(); }
+});
+
+test("次のセッション用モデルは作成後のセッションだけに移る", () => {
+  const db = new BotDb(":memory:");
+  try {
+    db.setPendingModel("g:c", "openrouter:other/model");
+    assert.equal(db.getPendingModel("g:c"), "openrouter:other/model");
+    db.activateModel("g:c", "s1");
+    assert.equal(db.getPendingModel("g:c"), null);
+    assert.equal(db.getOverride({ kind: "session", id: "s1" }, "model"), "openrouter:other/model");
+    assert.equal(db.getOverride({ kind: "session", id: "s2" }, "model"), null);
   } finally { db.close(); }
 });

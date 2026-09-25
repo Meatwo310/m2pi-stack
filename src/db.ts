@@ -39,6 +39,12 @@ const migrations = [
    ALTER TABLE config_overrides ADD COLUMN stream_status_text TEXT;
    ALTER TABLE config_overrides ADD COLUMN tool_display TEXT CHECK(tool_display IN ('off','on'));
    ALTER TABLE config_overrides ADD COLUMN tool_template TEXT;`,
+  `ALTER TABLE config_overrides ADD COLUMN model_permission TEXT CHECK(model_permission IN ('none','list','all'));
+   ALTER TABLE config_overrides ADD COLUMN model_allowlist TEXT;
+   CREATE TABLE pending_models (
+     conversation_key TEXT PRIMARY KEY,
+     model TEXT NOT NULL
+   ) STRICT;`,
 ] as const;
 
 type ConfigRow = Partial<Record<SettingKey, string | null>>;
@@ -161,5 +167,28 @@ export class BotDb {
 
   isManagedThread(threadId: string): boolean {
     return !!this.db.prepare("SELECT 1 FROM managed_threads WHERE thread_id = ?").get(threadId);
+  }
+
+  getPendingModel(conversationKey: string): string | null {
+    const row = this.db.prepare("SELECT model FROM pending_models WHERE conversation_key = ?")
+      .get(conversationKey) as { model: string } | undefined;
+    return row?.model ?? null;
+  }
+
+  setPendingModel(conversationKey: string, model: string): void {
+    validateSetting("model", model);
+    this.db.prepare(`INSERT INTO pending_models (conversation_key, model) VALUES (?, ?)
+      ON CONFLICT(conversation_key) DO UPDATE SET model = excluded.model`).run(conversationKey, model);
+  }
+
+  clearPendingModel(conversationKey: string): void {
+    this.db.prepare("DELETE FROM pending_models WHERE conversation_key = ?").run(conversationKey);
+  }
+
+  activateModel(conversationKey: string, sessionId: string): void {
+    const model = this.getPendingModel(conversationKey);
+    if (model === null) return;
+    this.setOverride({ kind: "session", id: sessionId }, "model", model);
+    this.clearPendingModel(conversationKey);
   }
 }

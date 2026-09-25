@@ -4,6 +4,8 @@ export const settingKeys = [
   "external_thread_trigger",
   "conversation_target",
   "model",
+  "model_permission",
+  "model_allowlist",
   "model_display",
   "model_template",
   "reasoning_display",
@@ -17,6 +19,7 @@ export type SettingKey = (typeof settingKeys)[number];
 export type Trigger = "mention" | "all" | "off";
 export type ConversationTarget = "direct" | "new_thread";
 export type ModelDisplay = "off" | "requested" | "route";
+export type ModelPermission = "none" | "list" | "all";
 export type ReasoningDisplay = "off" | "summary" | "text";
 export type ReasoningSummaryFallback = "hide" | "text";
 export type Toggle = "off" | "on";
@@ -29,6 +32,8 @@ export type Settings = {
   external_thread_trigger: Trigger;
   conversation_target: ConversationTarget;
   model: string;
+  model_permission: ModelPermission;
+  model_allowlist: string;
   model_display: ModelDisplay;
   model_template: string;
   reasoning_display: ReasoningDisplay;
@@ -44,6 +49,8 @@ export const defaults: Settings = {
   external_thread_trigger: "mention",
   conversation_target: "direct",
   model: "openrouter:openrouter/free",
+  model_permission: "list",
+  model_allowlist: "openrouter:openrouter/free",
   model_display: "route",
   model_template: "-# 🤖 ${model}",
   reasoning_display: "text",
@@ -67,6 +74,7 @@ export function validateSetting(key: SettingKey, value: string): void {
     return;
   }
   const choices: Partial<Record<SettingKey, readonly string[]>> = {
+    model_permission: ["none", "list", "all"],
     model_display: ["off", "requested", "route"],
     reasoning_display: ["off", "summary", "text"],
     reasoning_summary_fallback: ["hide", "text"],
@@ -88,9 +96,27 @@ export function validateSetting(key: SettingKey, value: string): void {
     }
     return;
   }
-  if (!/^[a-z0-9_-]+:.+$/i.test(value)) {
+  if (key === "model_allowlist") {
+    if (value.length > 2000 || (value && value.split(",").some((model) => !isModelId(model.trim())))) {
+      throw new Error("model_allowlist は provider:model-id のカンマ区切りにしてください");
+    }
+    return;
+  }
+  if (!isModelId(value)) {
     throw new Error("model は provider:model-id の形式です（例: openrouter:openrouter/free）");
   }
+}
+
+function isModelId(value: string): boolean { return /^[a-z0-9_-]+:[^\s,]+$/i.test(value); }
+
+export function allowedModels(settings: Settings): string[] {
+  return settings.model_allowlist ? settings.model_allowlist.split(",").map((model) => model.trim()) : [];
+}
+
+export function canSelectModel(settings: Settings, model: string): boolean {
+  validateSetting("model", model);
+  return settings.model_permission === "all" ||
+    (settings.model_permission === "list" && allowedModels(settings).includes(model));
 }
 
 export function parseModel(value: string): { provider: string; id: string } {
