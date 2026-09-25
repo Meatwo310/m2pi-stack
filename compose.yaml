@@ -14,6 +14,7 @@ services:
       DISCORD_ALLOWED_USER_IDS: ${DISCORD_ALLOWED_USER_IDS:-}
       DISCORD_TOKEN_FILE: /run/secrets/discord_token
       M2PI_AGENT_URL: http://agent:8787
+      M2PI_DEFAULT_MODEL: ${M2PI_DEFAULT_MODEL:-openrouter:openrouter/free}
     secrets:
       - discord_token
     volumes:
@@ -25,15 +26,11 @@ services:
     command: ["node", "dist/worker.js"]
     restart: unless-stopped
     init: true
-    environment:
-      OPENROUTER_API_KEY_FILE: /run/secrets/openrouter_api_key
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 10s
       timeout: 3s
       retries: 5
-    secrets:
-      - openrouter_api_key
     volumes:
       - agent_state:/data
       - workspace:/workspace
@@ -41,8 +38,6 @@ services:
 secrets:
   discord_token:
     file: ${INSTANCE_DIR:?Set INSTANCE_DIR}/secrets/discord_token
-  openrouter_api_key:
-    file: ${INSTANCE_DIR:?Set INSTANCE_DIR}/secrets/openrouter_api_key
 
 volumes:
   bot_state:

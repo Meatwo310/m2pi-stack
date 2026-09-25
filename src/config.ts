@@ -100,9 +100,9 @@ export const defaults: Settings = {
   managed_thread_trigger: "all",
   external_thread_trigger: "mention",
   conversation_target: "direct",
-  model: "openrouter:openrouter/free",
+  model: process.env.M2PI_DEFAULT_MODEL?.trim() || "openrouter:openrouter/free",
   model_permission: "list",
-  model_allowlist: "openrouter:openrouter/free",
+  model_allowlist: process.env.M2PI_DEFAULT_MODEL?.trim() || "openrouter:openrouter/free",
   model_display: "route",
   model_template: "-# 🤖 ${model}",
   reasoning_display: "text",
@@ -111,6 +111,8 @@ export const defaults: Settings = {
   tool_display: "on",
   tool_template: "-# 🔧 ${tool} — ${status}",
 };
+
+validateSetting("model", defaults.model);
 
 export function validateSetting(key: SettingKey, value: string): void {
   const choices = settingChoices[key];

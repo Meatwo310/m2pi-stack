@@ -16,10 +16,6 @@ const workspace = process.env.M2PI_WORKSPACE ?? "/workspace";
 const appRoot = fileURLToPath(new URL("../", import.meta.url));
 const agentDir = process.env.PI_CODING_AGENT_DIR ?? "/data/pi/agent";
 const sessionDir = process.env.PI_CODING_AGENT_SESSION_DIR ?? "/data/pi/sessions";
-const keyPath = process.env.OPENROUTER_API_KEY_FILE;
-if (!keyPath) throw new Error("OPENROUTER_API_KEY_FILE が必要です");
-process.env.OPENROUTER_API_KEY = readFileSync(keyPath, "utf8").trim();
-if (!process.env.OPENROUTER_API_KEY) throw new Error("OpenRouter API キーが空です");
 for (const path of [workspace, agentDir, sessionDir, process.env.HOME ?? "/data/home"]) {
   mkdirSync(path, { recursive: true });
 }

@@ -457,7 +457,7 @@ async function handleConfigComponent(interaction: StringSelectMenuInteraction<"c
     const scope = available.find((candidate) => candidate.kind === kind);
     if (!scope) throw new Error("この設定先は現在選べません");
     const current = db.resolve(available.slice(available.indexOf(scope))).values[item];
-    const hint = item === "model" ? "例: openrouter:openrouter/free" : item === "model_allowlist" ? "モデルを1行に1つ入力（例: openrouter:openrouter/free）" : `必須: ${requiredPlaceholders[item]?.join("、") ?? ""}`;
+    const hint = item === "model" ? `例: ${defaults.model}` : item === "model_allowlist" ? `モデルを1行に1つ入力（例: ${defaults.model}）` : `必須: ${requiredPlaceholders[item]?.join("、") ?? ""}`;
     const input = new TextInputBuilder().setCustomId("value").setLabel(settingLabels[item]).setStyle(item === "model_allowlist" ? TextInputStyle.Paragraph : TextInputStyle.Short)
       .setRequired(item !== "model_allowlist").setMaxLength(item === "model_allowlist" ? 2000 : item === "model" ? 100 : 500)
       .setPlaceholder(hint.slice(0, 100)).setValue((item === "model_allowlist" ? parseModelAllowlist(current).join("\n") : current).slice(0, item === "model_allowlist" ? 2000 : item === "model" ? 100 : 500));

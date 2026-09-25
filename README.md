@@ -6,8 +6,8 @@ Pi Agent を Discord から使うための Compose スタックです。1 つの
 
 Compose で起動するには Docker Compose が必要です。ホストへの Node.js と pnpm のインストールは不要です。Discord アプリでは **Message Content Intent** を有効にし、bot にメッセージの閲覧・送信、スレッド作成・送信、スラッシュコマンドの権限を付けます。
 
-1. `instances/example/.env.example` を `instances/<名前>/.env` にコピーし、`COMPOSE_PROJECT_NAME`、`INSTANCE_DIR`、管理者ユーザー ID を設定します。ユーザー ID はカンマ区切りで複数指定できます。`DISCORD_ALLOW_ALL_USERS=false`（初期値）では `DISCORD_ALLOWED_USER_IDS` と管理者だけが利用でき、許可ユーザー欄が空なら管理者だけです。`DISCORD_ALLOW_ALL_USERS=true` にすると bot が参加する全サーバーの全ユーザーが会話と `/new`・`/resume` を利用できます。`/config`・`/restart` は引き続き管理者専用です。これらのユーザー設定は全サーバーで共通です。
-2. `instances/<名前>/secrets/discord_token` と `instances/<名前>/secrets/openrouter_api_key` を作り、各ファイルに対応するトークンだけを書きます。これらのファイルと `.env` は Git の対象外です。
+1. `instances/example/.env.example` を `instances/<名前>/.env` にコピーし、`COMPOSE_PROJECT_NAME`、`INSTANCE_DIR`、管理者ユーザー ID、`M2PI_DEFAULT_MODEL` を設定します。モデルは `provider:model-id` 形式です。ユーザー ID はカンマ区切りで複数指定できます。`DISCORD_ALLOW_ALL_USERS=false`（初期値）では `DISCORD_ALLOWED_USER_IDS` と管理者だけが利用でき、許可ユーザー欄が空なら管理者だけです。`DISCORD_ALLOW_ALL_USERS=true` にすると bot が参加する全サーバーの全ユーザーが会話と `/new`・`/resume` を利用できます。`/config`・`/restart` は引き続き管理者専用です。これらのユーザー設定は全サーバーで共通です。
+2. `instances/<名前>/secrets/discord_token` を作り、Discord トークンだけを書きます。このファイルと `.env` は Git の対象外です。モデルの認証は後述の Pi ログインで設定します。
 3. リポジトリのルートから起動します。
 
 ```sh
@@ -15,6 +15,18 @@ docker compose --env-file instances/<名前>/.env up -d --build
 ```
 
 更新後は同じコマンドで再ビルドできます。イメージを変更していなければ `--build` は省略できます。bot が参加するサーバーでは同じインスタンスを利用し、会話とギルド単位の設定はサーバーごとに区別します。Pi の作業領域と agent の状態は共有されます。分離したい場合は、別の Discord bot と Compose インスタンスを用意します。
+
+### モデルの認証
+
+Pi が対応するプロバイダーを利用できます。agent と同じ状態 volume を使う Pi CLI を起動し、`/login <provider>` を実行してください。OpenRouter は `/login openrouter` で「Use an API key」を選ぶと既存のキーを保存できます。「Sign in with OpenRouter」を選ぶと OpenRouter の認証画面から新しいキーを発行できます。Codex サブスクリプションは `/login openai-codex` です。ブラウザーからコンテナへ戻れない場合は、最終リダイレクト URL または認証コードを Pi に貼り付けます。
+
+```sh
+docker compose --env-file instances/<名前>/.env run --rm --no-deps --entrypoint node agent ./node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js
+```
+
+認証後、同じ CLI の `--list-models <provider>` でモデル ID を確認し、`.env` の `M2PI_DEFAULT_MODEL` に `provider:model-id` を指定して Compose を再起動します。Discord の管理者は `/config set` または `/model name:provider:model-id` でも変更できます。既にデータベースに設定したモデルは `.env` の初期値より優先されます。一般ユーザーが `/model` で選ぶモデルは `model_allowlist` に追加してください。Pi の認証情報は `agent_state` volume の `/data/pi/agent/auth.json` に保存されます。この volume はバックアップ時も秘密情報として扱ってください。
+
+従来の `instances/<名前>/secrets/openrouter_api_key` を使っていたインスタンスでは、更新前に Pi CLI の `/login openrouter` でキーを登録してください。更新後はその秘密ファイルを読みません。登録と動作を確認した後、古いファイルを削除できます。
 
 全ユーザーに開放する場合は、使用中の `instances/<名前>/.env` に `DISCORD_ALLOW_ALL_USERS=true` を指定して再ビルド・再起動してください。`DISCORD_ALLOWED_USER_IDS` はこの設定が `true` の場合は利用判定に影響しません。メッセージへの反応は各チャンネルの `channel_trigger` 設定と bot の Discord 権限にも従います。
 
@@ -35,7 +47,7 @@ docker compose --env-file instances/<名前>/.env logs -f bot agent
 
 Discord のサブコマンド仕様により、`/config` だけでパネルを開くことはできません。既存の `set`・`reset` を維持するため、`/config panel` を入口にしています。`/config set` では `session`、`channel`、`category`、`guild`、`instance` の階層を選びます。例えば `setting=model`、`value=openrouter:openrouter/free` と指定します。`/config reset` は選んだ階層の上書きを消して継承に戻します。
 
-`model_permission` は一般ユーザーの `/model` 変更権限で、`none`（禁止）、`list`（許可リストのみ）、`all`（全モデル）から選びます。初期値は `list` です。`model_allowlist` は `provider:model-id` を1行に1つ入力し、初期値は `openrouter:openrouter/free` だけです。両方とも `/config set` で階層ごとに上書きできます。管理者は権限設定によらずモデルを指定できます。ピッカーには最大 25 件を表示し、`all` の場合もそれ以外のモデルは直接指定できます。
+`model_permission` は一般ユーザーの `/model` 変更権限で、`none`（禁止）、`list`（許可リストのみ）、`all`（全モデル）から選びます。初期値は `list` です。`model_allowlist` は `provider:model-id` を1行に1つ入力し、初期値は `M2PI_DEFAULT_MODEL` の値です。両方とも `/config set` で階層ごとに上書きできます。管理者は権限設定によらずモデルを指定できます。ピッカーには最大 25 件を表示し、`all` の場合もそれ以外のモデルは直接指定できます。
 
 進行表示は次の設定で調整できます。テンプレートは改行なしの 1～500 文字です。設定値は `/config show` で確認できます。
 
