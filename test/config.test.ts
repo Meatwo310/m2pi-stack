@@ -1,7 +1,23 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { canSelectModel, defaults, parseModel, selectTrigger, type Scope } from "../src/config.ts";
+import { canSelectModel, defaults, parseModel, requiredPlaceholders, selectTrigger, settingChoices, settingGroups, settingKeys, validateSetting, type Scope } from "../src/config.ts";
 import { BotDb } from "../src/db.ts";
+
+test("設定パネルのカテゴリと選択肢は検証対象を網羅する", () => {
+  const grouped = Object.values(settingGroups).flatMap((group) => [...group.keys]);
+  assert.deepEqual([...grouped].sort(), [...settingKeys].sort());
+  assert.equal(new Set(grouped).size, settingKeys.length);
+  for (const key of settingKeys) {
+    const choices = settingChoices[key];
+    if (choices) {
+      assert.ok(choices.length > 0);
+      for (const choice of choices) assert.doesNotThrow(() => validateSetting(key, choice));
+      assert.throws(() => validateSetting(key, "invalid-choice"));
+    } else if (requiredPlaceholders[key]) {
+      assert.throws(() => validateSetting(key, "placeholder missing"));
+    }
+  }
+});
 
 test("設定は項目ごとに session → channel → category → guild → instance と継承する", () => {
   const db = new BotDb(":memory:");

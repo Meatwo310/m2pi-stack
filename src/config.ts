@@ -16,6 +16,28 @@ export const settingKeys = [
 ] as const;
 
 export type SettingKey = (typeof settingKeys)[number];
+export const settingGroups = {
+  conversation: { label: "🎯 会話トリガー", keys: ["channel_trigger", "managed_thread_trigger", "external_thread_trigger", "conversation_target"] },
+  model: { label: "🤖 モデル", keys: ["model", "model_permission", "model_allowlist"] },
+  display: { label: "💬 表示テンプレート", keys: ["model_display", "model_template", "reasoning_display", "reasoning_summary_fallback", "reasoning_template", "tool_display", "tool_template"] },
+} as const satisfies Record<string, { label: string; keys: readonly SettingKey[] }>;
+export type SettingGroup = keyof typeof settingGroups;
+export const settingChoices: Partial<Record<SettingKey, readonly string[]>> = {
+  channel_trigger: ["mention", "all", "off"],
+  managed_thread_trigger: ["mention", "all", "off"],
+  external_thread_trigger: ["mention", "all", "off"],
+  conversation_target: ["direct", "new_thread"],
+  model_permission: ["none", "list", "all"],
+  model_display: ["off", "requested", "route"],
+  reasoning_display: ["off", "summary", "text"],
+  reasoning_summary_fallback: ["hide", "text"],
+  tool_display: ["off", "on"],
+};
+export const requiredPlaceholders: Partial<Record<SettingKey, readonly string[]>> = {
+  model_template: ["${model}"],
+  reasoning_template: ["${thought}"],
+  tool_template: ["${tool}", "${status}"],
+};
 export type Trigger = "mention" | "all" | "off";
 export type ConversationTarget = "direct" | "new_thread";
 export type ModelDisplay = "off" | "requested" | "route";
@@ -61,38 +83,15 @@ export const defaults: Settings = {
 };
 
 export function validateSetting(key: SettingKey, value: string): void {
-  if (key.endsWith("_trigger")) {
-    if (!["mention", "all", "off"].includes(value)) {
-      throw new Error("trigger は mention / all / off のいずれかです");
-    }
+  const choices = settingChoices[key];
+  if (choices) {
+    if (!choices.includes(value)) throw new Error(`${key} は ${choices.join(" / ")} のいずれかです`);
     return;
   }
-  if (key === "conversation_target") {
-    if (!["direct", "new_thread"].includes(value)) {
-      throw new Error("conversation_target は direct / new_thread のいずれかです");
-    }
-    return;
-  }
-  const choices: Partial<Record<SettingKey, readonly string[]>> = {
-    model_permission: ["none", "list", "all"],
-    model_display: ["off", "requested", "route"],
-    reasoning_display: ["off", "summary", "text"],
-    reasoning_summary_fallback: ["hide", "text"],
-    tool_display: ["off", "on"],
-  };
-  if (choices[key]) {
-    if (!choices[key].includes(value)) throw new Error(`${key} は ${choices[key].join(" / ")} のいずれかです`);
-    return;
-  }
-  const placeholders: Partial<Record<SettingKey, string[]>> = {
-    model_template: ["${model}"],
-    reasoning_template: ["${thought}"],
-    tool_template: ["${tool}", "${status}"],
-  };
-  if (key in placeholders) {
+  if (key in requiredPlaceholders) {
     if (!value || value.length > 500 || /[\r\n]/.test(value)) throw new Error(`${key} は改行なしの 1～500 文字にしてください`);
-    if (placeholders[key]?.some((placeholder) => !value.includes(placeholder))) {
-      throw new Error(`${key} に ${placeholders[key]!.join(" と ")} を含めてください`);
+    if (requiredPlaceholders[key]?.some((placeholder) => !value.includes(placeholder))) {
+      throw new Error(`${key} に ${requiredPlaceholders[key]!.join(" と ")} を含めてください`);
     }
     return;
   }

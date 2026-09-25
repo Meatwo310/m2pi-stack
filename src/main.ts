@@ -1,22 +1,29 @@
 import { readFileSync } from "node:fs";
 import {
   ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   ChannelType,
   Client,
   EmbedBuilder,
   GatewayIntentBits,
   MessageType,
   MessageFlags,
+  ModalBuilder,
   SlashCommandBuilder,
   StringSelectMenuBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+  type ButtonInteraction,
   type ChatInputCommandInteraction,
   type Guild,
   type Message,
   type StringSelectMenuInteraction,
+  type ModalSubmitInteraction,
 } from "discord.js";
 import { AgentClient } from "./agent-client.js";
 import { allowAllUsers, canUseBot } from "./access.js";
-import { allowedModels, canSelectModel, defaults, selectTrigger, settingKeys, type Scope, type ScopeKind, type SettingKey, type Settings } from "./config.js";
+import { allowedModels, canSelectModel, defaults, requiredPlaceholders, selectTrigger, settingChoices, settingGroups, settingKeys, type Scope, type ScopeKind, type SettingGroup, type SettingKey, type Settings } from "./config.js";
 import { BotDb } from "./db.js";
 import { progressPages, textPages, type ProgressEntry } from "./progress-format.js";
 import { appendThinkingLines, completedThinkingLines } from "./thinking-lines.js";
@@ -38,7 +45,7 @@ function required(name: string): string {
   return value;
 }
 
-const settingChoices = settingKeys.map((key) => ({ name: key, value: key }));
+const settingOptions = settingKeys.map((key) => ({ name: key, value: key }));
 const scopeChoices: Array<{ name: ScopeKind; value: ScopeKind }> = [
   { name: "session", value: "session" },
   { name: "channel", value: "channel" },
@@ -54,15 +61,16 @@ const commands = [
     .addStringOption((option) => option.setName("name").setDescription("provider:model-id。省略するとモデルピッカーを表示")),
   new SlashCommandBuilder().setName("restart").setDescription("bot を再起動（管理者のみ）"),
   new SlashCommandBuilder().setName("config").setDescription("設定を表示・変更（管理者のみ）")
-    .addSubcommand((sub) => sub.setName("show").setDescription("この場所の有効な設定を表示"))
+    .addSubcommand((sub) => sub.setName("panel").setDescription("設定パネルを開く"))
+    .addSubcommand((sub) => sub.setName("show").setDescription("この場所の有効な設定をパネルで表示"))
     .addSubcommand((sub) => sub.setName("set").setDescription("設定を上書き")
       .addStringOption((option) => option.setName("scope").setDescription("設定階層").setRequired(true).addChoices(...scopeChoices))
-      .addStringOption((option) => option.setName("setting").setDescription("設定項目").setRequired(true).addChoices(...settingChoices))
+      .addStringOption((option) => option.setName("setting").setDescription("設定項目").setRequired(true).addChoices(...settingOptions))
       .addStringOption((option) => option.setName("value").setDescription("設定値").setRequired(true))
       .addChannelOption((option) => option.setName("target").setDescription("channel/category の対象。省略時は現在の場所")))
     .addSubcommand((sub) => sub.setName("reset").setDescription("上書きを消して継承に戻す")
       .addStringOption((option) => option.setName("scope").setDescription("設定階層").setRequired(true).addChoices(...scopeChoices))
-      .addStringOption((option) => option.setName("setting").setDescription("設定項目").setRequired(true).addChoices(...settingChoices))
+      .addStringOption((option) => option.setName("setting").setDescription("設定項目").setRequired(true).addChoices(...settingOptions))
       .addChannelOption((option) => option.setName("target").setDescription("channel/category の対象。省略時は現在の場所"))),
 ];
 
@@ -342,6 +350,142 @@ async function targetScope(interaction: ChatInputCommandInteraction<"cached">, k
   return { kind, id: info.categoryId };
 }
 
+type ConfigInteraction = ChatInputCommandInteraction<"cached"> | StringSelectMenuInteraction<"cached"> |
+  ButtonInteraction<"cached"> | ModalSubmitInteraction<"cached">;
+type ConfigView = { embeds: EmbedBuilder[]; components: ActionRowBuilder<ButtonBuilder | StringSelectMenuBuilder>[]; allowedMentions: { parse: [] } };
+const scopeLabels: Record<ScopeKind, string> = {
+  session: "このセッション", channel: "#このチャンネル", category: "このカテゴリ",
+  guild: "このサーバー", instance: "インスタンス全体",
+};
+const groupNames = Object.keys(settingGroups) as SettingGroup[];
+function isGroup(value: string): value is SettingGroup { return value in settingGroups; }
+function isSetting(value: string): value is SettingKey { return (settingKeys as readonly string[]).includes(value); }
+function isScopeKind(value: string): value is ScopeKind { return (scopeChoices as Array<{ value: string }>).some((scope) => scope.value === value); }
+function sourceLabel(source: Scope | "default"): string { return source === "default" ? "初期値" : scopeLabels[source.kind]; }
+function shortValue(value: string): string { return value.length > 180 ? `${value.slice(0, 177)}…` : value; }
+
+async function configView(interaction: ConfigInteraction, kind: ScopeKind, group: SettingGroup | null, item: SettingKey | null, notice?: string): Promise<ConfigView> {
+  const info = await context(interaction.guild, interaction.channelId!);
+  const sessionId = db.getActive(conversationKey(interaction.guildId!, interaction.channelId!));
+  const available = scopes(interaction.guildId!, info, sessionId);
+  const selected = available.find((scope) => scope.kind === kind);
+  if (!selected) throw new Error(`${scopeLabels[kind]}はこの場所では選べません`);
+  const resolved = db.resolve(available.slice(available.indexOf(selected)));
+  const embed = new EmbedBuilder().setTitle("設定パネル")
+    .setDescription(`${notice ? `${notice}\n\n` : ""}設定先: **${scopeLabels[kind]}**${kind === "session" ? "（現在のセッション）" : ""}\n値と継承元はこの設定先を基準に表示しています。/config set と /config reset でも操作できます。`);
+  if (!group) {
+    embed.addFields(groupNames.map((name) => ({
+      name: settingGroups[name].label,
+      value: settingGroups[name].keys.map((key) => `**${key}**: \`${shortValue(resolved.values[key]).slice(0, 70).replaceAll("`", "ˋ")}\` ← ${sourceLabel(resolved.sources[key])}`).join("\n"),
+    })));
+  } else {
+    const keys = settingGroups[group].keys;
+    embed.addFields({ name: "カテゴリ", value: settingGroups[group].label });
+    for (const key of keys) {
+      const value = shortValue(resolved.values[key]);
+      embed.addFields({ name: key === item ? `▶ ${key}` : key, value: `\`${value.replaceAll("`", "ˋ")}\` ← ${sourceLabel(resolved.sources[key])}`, inline: false });
+    }
+  }
+  const components: ConfigView["components"] = [];
+  components.push(new ActionRowBuilder<ButtonBuilder | StringSelectMenuBuilder>().addComponents(
+    ...scopeChoices.map(({ value }) => new ButtonBuilder().setCustomId(`config:scope:${value}:${group ?? "home"}:${item ?? "none"}`)
+      .setLabel(scopeLabels[value]).setStyle(value === kind ? ButtonStyle.Primary : ButtonStyle.Secondary)
+      .setDisabled(!available.some((scope) => scope.kind === value))),
+  ));
+  components.push(new ActionRowBuilder<ButtonBuilder | StringSelectMenuBuilder>().addComponents(
+    new StringSelectMenuBuilder().setCustomId(`config:group:${kind}`).setPlaceholder("カテゴリを選択")
+      .addOptions(groupNames.map((name) => ({ label: settingGroups[name].label, value: name, default: name === group }))),
+  ));
+  if (group) {
+    components.push(new ActionRowBuilder<ButtonBuilder | StringSelectMenuBuilder>().addComponents(
+      new StringSelectMenuBuilder().setCustomId(`config:item:${kind}:${group}`).setPlaceholder("設定項目を選択")
+        .addOptions(settingGroups[group].keys.filter((key) => kind !== "session" || key !== "conversation_target")
+          .map((key) => ({ label: key, value: key, default: key === item }))),
+    ));
+  }
+  if (group && item) {
+    const choices = settingChoices[item];
+    if (choices) {
+      components.push(new ActionRowBuilder<ButtonBuilder | StringSelectMenuBuilder>().addComponents(
+        new StringSelectMenuBuilder().setCustomId(`config:value:${kind}:${group}:${item}`).setPlaceholder("値を選択して反映")
+          .addOptions(choices.map((value) => ({ label: value, value, default: value === resolved.values[item] }))),
+      ));
+    } else {
+      components.push(new ActionRowBuilder<ButtonBuilder | StringSelectMenuBuilder>().addComponents(
+        new ButtonBuilder().setCustomId(`config:edit:${kind}:${group}:${item}`).setLabel("値を入力")
+          .setStyle(ButtonStyle.Primary),
+      ));
+    }
+    components.push(new ActionRowBuilder<ButtonBuilder | StringSelectMenuBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(`config:reset:${kind}:${group}:${item}`).setLabel(kind === "instance" ? "初期値に戻す" : "継承に戻す")
+        .setStyle(ButtonStyle.Secondary).setDisabled(db.getOverride(selected, item) === null),
+    ));
+  }
+  return { embeds: [embed], components, allowedMentions: { parse: [] } };
+}
+
+async function handleConfigComponent(interaction: StringSelectMenuInteraction<"cached"> | ButtonInteraction<"cached"> | ModalSubmitInteraction<"cached">): Promise<void> {
+  if (!admins.has(interaction.user.id)) throw new Error("管理者専用の設定パネルです");
+  const [prefix, action, kindText, groupText, itemText] = interaction.customId.split(":");
+  if (prefix !== "config" || !action || !kindText || !isScopeKind(kindText)) throw new Error("設定パネルを読み取れません");
+  const kind = kindText;
+  const group = groupText && isGroup(groupText) ? groupText : null;
+  const item = itemText && isSetting(itemText) ? itemText : null;
+  if (action === "edit" && interaction.isButton()) {
+    if (!group || !item || !settingGroups[group].keys.some((key) => key === item) || settingChoices[item]) throw new Error("設定項目が無効です");
+    const available = scopes(interaction.guildId!, await context(interaction.guild, interaction.channelId!), db.getActive(conversationKey(interaction.guildId!, interaction.channelId!)));
+    const scope = available.find((candidate) => candidate.kind === kind);
+    if (!scope) throw new Error("この設定先は現在選べません");
+    const current = db.resolve(available.slice(available.indexOf(scope))).values[item];
+    const hint = item === "model" ? "例: openrouter:openrouter/free" : item === "model_allowlist" ? "例: openrouter:openrouter/free,openai:gpt-4.1" : `必須: ${requiredPlaceholders[item]?.join("、") ?? ""}`;
+    const input = new TextInputBuilder().setCustomId("value").setLabel(item).setStyle(item === "model_allowlist" ? TextInputStyle.Paragraph : TextInputStyle.Short)
+      .setRequired(item !== "model_allowlist").setMaxLength(item === "model_allowlist" ? 2000 : item === "model" ? 100 : 500)
+      .setPlaceholder(hint.slice(0, 100)).setValue(current.slice(0, item === "model_allowlist" ? 2000 : item === "model" ? 100 : 500));
+    await interaction.showModal(new ModalBuilder().setCustomId(`config:modal:${kind}:${group}:${item}`)
+      .setTitle(`${item} を設定`.slice(0, 45)).addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(input)));
+    return;
+  }
+  await interaction.deferUpdate();
+  let nextKind = kind;
+  let nextGroup = group;
+  let nextItem = item;
+  let notice: string | undefined;
+  if (action === "scope") {
+    nextKind = kind;
+    nextGroup = groupText && isGroup(groupText) ? groupText : null;
+    nextItem = itemText && isSetting(itemText) ? itemText : null;
+    if (nextKind === "session" && nextItem === "conversation_target") nextItem = null;
+  } else if (action === "group" && interaction.isStringSelectMenu()) {
+    const chosen = interaction.values[0];
+    if (!chosen || !isGroup(chosen)) throw new Error("カテゴリが無効です");
+    nextGroup = chosen;
+    nextItem = null;
+  } else if (action === "item" && interaction.isStringSelectMenu()) {
+    const chosen = interaction.values[0];
+    if (!group || !chosen || !isSetting(chosen) || !settingGroups[group].keys.some((key) => key === chosen) || (kind === "session" && chosen === "conversation_target")) throw new Error("設定項目が無効です");
+    nextItem = chosen;
+  } else if (["value", "reset", "modal"].includes(action)) {
+    if (!group || !item || !settingGroups[group].keys.some((key) => key === item)) throw new Error("設定項目が無効です");
+    const info = await context(interaction.guild, interaction.channelId!);
+    const scope = scopes(interaction.guildId!, info, db.getActive(conversationKey(interaction.guildId!, interaction.channelId!))).find((candidate) => candidate.kind === kind);
+    if (!scope) throw new Error("この設定先は現在選べません");
+    if (action === "reset" && interaction.isButton()) {
+      db.resetOverride(scope, item);
+      notice = kind === "instance" ? `${item} を初期値に戻しました。` : `${item} を継承に戻しました。`;
+    } else if (action === "value" && interaction.isStringSelectMenu()) {
+      const value = interaction.values[0];
+      if (!value || !settingChoices[item]?.includes(value)) throw new Error("設定値が無効です");
+      db.setOverride(scope, item, value);
+      notice = `${item} を ${value} に設定しました。`;
+    } else if (action === "modal" && interaction.isModalSubmit()) {
+      const value = interaction.fields.getTextInputValue("value");
+      db.setOverride(scope, item, value);
+      notice = `${item} を設定しました。`;
+    } else throw new Error("設定パネルを読み取れません");
+  } else throw new Error("設定パネルを読み取れません");
+  await interaction.editReply(await configView(interaction, nextKind, nextGroup, nextItem, notice));
+}
+
 function modelView(settings: Settings, current: string, pending: boolean): {
   embeds: EmbedBuilder[];
   components: ActionRowBuilder<StringSelectMenuBuilder>[];
@@ -391,6 +535,18 @@ async function handleModelSelect(interaction: StringSelectMenuInteraction<"cache
 }
 
 client.on("interactionCreate", (interaction) => {
+  if ((interaction.isStringSelectMenu() || interaction.isButton() || interaction.isModalSubmit()) && interaction.customId.startsWith("config:")) {
+    if (!interaction.inCachedGuild()) return;
+    void handleConfigComponent(interaction).catch(async (error) => {
+      console.error("config panel error", error);
+      const content = error instanceof Error ? error.message : "設定パネルの操作に失敗しました";
+      try {
+        if (interaction.deferred || interaction.replied) await interaction.followUp({ content, ephemeral: true });
+        else await interaction.reply({ content, ephemeral: true });
+      } catch (replyError) { console.error("reply error", replyError); }
+    });
+    return;
+  }
   if (interaction.isStringSelectMenu() && interaction.customId === "model:select") {
     if (!interaction.inCachedGuild()) return;
     void handleModelSelect(interaction).catch(async (error) => {
@@ -476,16 +632,10 @@ async function handleCommand(interaction: ChatInputCommandInteraction<"cached">)
   }
   if (command === "config") {
     const action = interaction.options.getSubcommand();
-    if (action === "show") {
-      const info = await context(interaction.guild, interaction.channelId);
-      const effective = db.resolve(scopes(interaction.guildId, info, db.getActive(key)));
-      const lines = settingKeys.map((item) => {
-        const source = effective.sources[item];
-        return `${item}: \`${effective.values[item]}\` ← ${source === "default" ? "default" : `${source.kind}:${source.id}`}`;
-      });
-      const chunks = pieces(lines.join("\n"));
-      await interaction.reply({ content: chunks[0]!, ephemeral: true, allowedMentions: { parse: [] } });
-      for (const chunk of chunks.slice(1)) await interaction.followUp({ content: chunk, ephemeral: true, allowedMentions: { parse: [] } });
+    if (action === "show" || action === "panel") {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+      const kind: ScopeKind = db.getActive(key) ? "session" : "channel";
+      await interaction.editReply(await configView(interaction, kind, null, null));
       return;
     }
     const kind = interaction.options.getString("scope", true) as ScopeKind;
